@@ -430,4 +430,70 @@ plot_matrix(remote_matrix_naive$all) +
   plot_matrix(remote_matrix_updated$all) +
   ggtitle("Polymod extrapolated\nhousehold corrected")
 
+# convert to a next generation matrix
+
+# construct a contact matrix for all of Australia
+australia_contact_matrix <- conmat::abs_pop_age_lga_2020 %>%
+  group_by(age_group) %>%
+  summarise(
+    population = sum(population)
+  ) %>%
+  mutate(
+    lower.age.limit = readr::parse_number(as.character(age_group))
+  ) %>%
+  extrapolate_polymod(
+    age_breaks = age_limits_5y
+  )
+
+# apply age-based susceptibility and infectiousness from Davies et al.
+
+australia_ngm_unscaled <- apply_age_contribution(australia_contact_matrix$all)
+
+m <- find_m(
+  R_target = 3.6,
+  transition_matrix = australia_ngm_unscaled
+)
+
+remote_nt_ngm_unscaled <- apply_age_contribution(remote_matrix_updated$all)
+
+australia_ngm <- australia_ngm_unscaled * m
+remote_nt_ngm <- remote_nt_ngm_unscaled * m
+
+
+colSums(remote_matrix_updated$home) / colSums(australia_contact_matrix$home)
+
+
+
+# apply vaccination
+readRDS("data/vacc_effect_by_age_scenario_19.RDS") %>%
+  group_by(vacc_coverage, vacc_schoolkids) %>%
+  summarise(
+    australia_tp_reduction = vacc_tp_reduction(vacc_effect, australia_ngm),
+    remote_nt_tp_reduction = vacc_tp_reduction(vacc_effect, remote_nt_ngm)
+  ) %>%
+  pivot_longer(
+    ends_with("reduction"),
+    names_to = "population_group",
+    values_to = "tp_multiplier"
+  ) %>%
+  mutate(
+    population_group = str_remove(population_group, "_tp_reduction"),
+    tp_percent_reduction = 100 * (1 - tp_multiplier)
+  ) %>%
+  arrange(
+    population_group,
+    vacc_schoolkids,
+    vacc_coverage
+  ) %>%
+  mutate(
+    starting_tp = case_when(
+      population_group == "australia" ~ get_R(australia_ngm),
+      population_group == "remote_nt" ~ get_R(remote_nt_ngm)
+    ),
+    post_vacc_tp = starting_tp * tp_multiplier
+  )
+  
+
+
+
 

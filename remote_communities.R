@@ -42,21 +42,19 @@ nt_remote_aboriginal_pop <- nt_lhd_aboriginal_pop %>%
 
 # extrapolate synthetic contact matrices from polymod to this population age
 # distribution
-remote_matrix <- nt_remote_aboriginal_pop %>%
+remote_matrix_naive <- nt_remote_aboriginal_pop %>%
   conmat::extrapolate_polymod(
     age_breaks = age_limits_5y
   )
 
 # plot these
 plot_setting_matrices(
-  remote_matrix,
+  remote_matrix_naive,
   "NT remote aboriginal populations (extrapolated from polymod)"
 )
 
 # to do: add household structure, workforce participation, school participation,
 # and calibrate non-household vs. household based on surveys
-
-# diagnose why school is wonky
 
 # compute calibration factors for household contacts, based on broad groupings
 # from Vino et al. study
@@ -64,7 +62,7 @@ plot_setting_matrices(
 # 2. replace household contacts with an interpolated estimate from Vino et al.
 
 # first, get the extrapolated household matrix in these broad age groups
-remote_matrix_broad <- nt_remote_aboriginal_pop %>%
+remote_matrix_naive_broad <- nt_remote_aboriginal_pop %>%
   conmat::extrapolate_polymod(
     age_breaks = age_limits_broad
   )
@@ -171,7 +169,7 @@ remote_household_matrix_broad <- remote_households %>%
   ) %>%
   as.matrix()
 
-plot_matrix(remote_matrix_broad$home) +
+plot_matrix(remote_matrix_naive_broad$home) +
   ggtitle("polymod extrapolated") +
 plot_matrix(remote_household_matrix_broad) +
   ggtitle("Vino et al")
@@ -187,21 +185,10 @@ age_group_lookup_broad <- tibble(
     )
   )
 
-age_group_lookup_5y <- tibble(
-  age =  0:100
-) %>%
-  mutate(
-    age_group = case_when(
-      age < 5 ~ "baby",
-      age < 16 ~ "child",
-      TRUE ~ "adult"
-    )
-  )
-
 nt_aboriginal_pop_fun <- get_nt_aboriginal_pop_function()
 
 # get household correction factors, at 5y level
-household_correction_factor_broad <- remote_household_matrix_broad / remote_matrix_broad$home
+household_correction_factor_broad <- remote_household_matrix_broad / remote_matrix_naive_broad$home
 household_correction_factor_5y <- household_correction_factor_broad %>%
   conmat::matrix_to_predictions() %>%
   rename(
@@ -253,14 +240,60 @@ household_correction_factor_5y <- household_correction_factor_broad %>%
   conmat::predictions_to_matrix()
   
 # apply the correction
-remote_matrix_updated <- remote_matrix
+remote_matrix_updated <- remote_matrix_naive
 remote_matrix_updated$home <- remote_matrix_updated$home * household_correction_factor_5y
 remote_matrix_updated$all <- with(remote_matrix_updated,
                           home + school + work + other)
-plot_setting_matrices(remote_matrix)
+
+plot_setting_matrices(remote_matrix_naive)
 plot_setting_matrices(remote_matrix_updated)
   
-colSums(remote_matrix_updated$home) / colSums(remote_matrix$home)
+colSums(remote_matrix_updated$home) / colSums(remote_matrix_naive$home)
+
+plot_matrix(remote_matrix_naive$all) +
+  ggtitle("Polymod extrapolated") +
+  plot_matrix(remote_matrix_updated$all) +
+  ggtitle("Polymod extrapolated\nhousehold corrected")
+  
+
+Re(eigen(remote_matrix_updated$all)$values[1]) / 
+Re(eigen(remote_matrix_naive$all)$values[1])
+
+
+# compare the number of social (non-household, non-work, non-school) contacts of
+# at lleast 1h from the CAMP-remote study (median 2) to a comparable subset
+# (women aged 17-37) of the polymod survey population
+
+# female polymod respondents aged 17-37 (comparable to CAMP-remote)
+polymod_comparable_ids <- polymod$participants %>%
+  filter(
+    part_gender == "F",
+    between(part_age, 17, 37)
+  ) %>% 
+  pull(part_id)
+
+# pull the mean and median number of social contacts ov longer than 1h
+polymod$contacts %>%
+  filter(
+    part_id %in% polymod_comparable_ids,
+    cnt_home == 0 & cnt_work == 0 & cnt_school == 0
+  ) %>%
+  group_by(part_id) %>%
+  summarise(
+    contacts_1h = sum(duration_multi >= 4)
+  ) %>%
+  ungroup() %>%
+  summarise(
+    across(
+      starts_with("contacts"),
+      .fns = list(
+        mean = ~mean(.x, na.rm = TRUE),
+        median = ~median(.x, na.rm = TRUE)
+      )
+    )
+  )
+
+# mean 2.09, median 1. Not obviously different to CAMP-remote, so leave the 'other' matrix it as-is
 
 # # impute ages (in 5 year bins) from distributions, compute contact matrices, and average:
 # remote_household_minimal <- remote_households %>%

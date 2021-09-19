@@ -331,7 +331,8 @@ employment_ratio <- conmat::abs_employ_age_lga %>%
       ratio,
       `total_remote aboriginal` + total_NSW,
       na.rm = TRUE)
-  )
+  ) %>%
+  pull(ratio)
 
 nsw_pop_fun <- conmat::abs_state_age %>%
   filter(
@@ -341,6 +342,9 @@ nsw_pop_fun <- conmat::abs_state_age %>%
     lower.age.limit = readr::parse_number(as.character(age_group))
   ) %>%
   get_age_population_function()
+
+
+nt_aboriginal_pop_fun <- get_nt_aboriginal_pop_function(remote = FALSE)
 
 # adjust school contacts
 school_ratio <- conmat::abs_education_state %>%
@@ -364,7 +368,7 @@ school_ratio <- conmat::abs_education_state %>%
   ) %>%
   mutate(
     population = case_when(
-      population_group == "NT aboriginal" ~ nt_aboriginal_pop_fun(age, remote = FALSE),
+      population_group == "NT aboriginal" ~ nt_aboriginal_pop_fun(age),
       TRUE ~ nsw_pop_fun(age)
     ),
     school_fraction = if_else(
@@ -392,30 +396,35 @@ school_ratio <- conmat::abs_education_state %>%
       population_NSW + `population_NT aboriginal`,
       na.rm = TRUE
     )
-  )
-
+  ) %>%
+  pull(ratio)
 
 # apply the household contact correction matrix
 remote_matrix_updated <- remote_matrix_naive
 remote_matrix_updated$home <- remote_matrix_naive$home * household_correction_factor_5y
 
-# employment rate in remote NT is approximately 46% of the urbanised, culturally European
-# Australian population that is representative of polymod, so scle down workplace contacts
-remote_matrix_updated$work <- remote_matrix_naive$work * employment_ratio
+# employment rate in remote NT is approximately 47% of the NSW population that
+# is broadly representative of polymod
+employment_ratio
 
 # school attendance rate in aboriginal NT is approximately 89% of NSW
-# population, which is broaadlys representative of polymod, so scale down school contacts
-remote_matrix_updated$school <- remote_matrix_naive$school * school_ratio
+# population, which is broadly representative of polymod
+school_ratio
+
+# however work/school contacts are likely compensated for by increased social
+# and culutral contacts during those hours (possibly with similar age
+# structures), so in the absence of data on these other contacts, leave the work
+# and school contacts as they are
 
 # update the 'all settings' matrix
 remote_matrix_updated$all <- with(remote_matrix_updated,
                                   home + school + work + other)
 
+# plot setting-sepcific matrices before and after updating
 plot_setting_matrices(remote_matrix_naive)
 plot_setting_matrices(remote_matrix_updated)
 
-colSums(remote_matrix_updated$home) / colSums(remote_matrix_naive$home)
-
+# plot overall contact matrices
 plot_matrix(remote_matrix_naive$all) +
   ggtitle("Polymod extrapolated") +
   plot_matrix(remote_matrix_updated$all) +

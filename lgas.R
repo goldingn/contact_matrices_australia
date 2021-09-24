@@ -24,8 +24,16 @@ lgas <- c(
   # NSW SEIFA 5
   "Northern Beaches (A)",
   # VIC SEIFA 5
-  "Bayside (C)"
+  "Bayside (C)",
+  #SA
+  "Playford (C)",
+  "Burnside (C)",
+  "Alice Springs (T)"
 )
+
+lgairsad <- fread("data/lga_irsad.csv") %>% janitor::clean_names()
+lgas <- unique(lgairsad$lga)
+lgas <- lgas[lgas %in% abs_lga_lookup$lga][!lgas %like% "Unincorp"]
 
 # loop through named lgas getting setting-specific synthetic contact matrices,
 # accounting for population age distributions and household sizes
@@ -101,8 +109,10 @@ lga_ngms <- lga_ngms_unscaled %>%
     m
   )
 
+lga_ngms_filter <- lga_ngms[!(lga_ngms %>% sapply(function(x) any(is.nan(x))))]
+
 # get equivalent TPs for different LGAs
-lga_TPs <- lga_ngms %>%
+lga_TPs <- lga_ngms_filter %>%
   vapply(
     get_R,
     FUN.VALUE = numeric(1)
@@ -118,4 +128,26 @@ lga_TPs <- lga_ngms %>%
 # need to pull in code to make upside-down TP barplots as per the first national
 # plan modelling report
 
+tpframe <- data.table(tp=lga_TPs, lga=names(lga_TPs))
+lgairsad_simplified <- lgairsad[count > 0 & (irsad_deciles_at_lga_level_area != "Total" &
+                        irsad_deciles_at_lga_level_area != "Not applicable" &
+                        lga != "Total"), .(lga, decile=as.numeric(gsub("Decile ", "", irsad_deciles_at_lga_level_area)))]
 
+tpirsad <- merge(tpframe, lgairsad_simplified, by='lga', all.x=T)
+
+ggplot(tpirsad, aes(x=decile, y=tp)) + geom_point()
+
+lgas_care_about <- c(
+  # NSW SEIFA 1
+  "Fairfield (C)",
+  # VIC SEIFA 1
+  "Greater Dandenong (C)",
+  # NSW SEIFA 5
+  "Northern Beaches (A)",
+  # VIC SEIFA 5
+  "Bayside (C)",
+  #SA
+  "Playford (C)",
+  "Burnside (C)",
+  "Alice Springs (T)"
+)

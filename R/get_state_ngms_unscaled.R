@@ -7,7 +7,7 @@
 #' @return
 #' @author Nick Golding
 #' @export
-get_state_ngms_unscaled <- function(model) {
+get_state_ngms_unscaled <- function(model, age_breaks) {
 
   # return a list of unscaled NGMs for Australian states, accounting for
   # population age distributions and household sizes
@@ -26,7 +26,7 @@ get_state_ngms_unscaled <- function(model) {
         predict_setting_contacts(
           contact_model = model,
           population = abs_age_state(state),
-          age_breaks = age_breaks_5y
+          age_breaks = age_breaks
         )
       )
     ) %>%

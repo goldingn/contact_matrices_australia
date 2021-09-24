@@ -10,12 +10,12 @@ model <- fit_setting_contacts(
 )
 
 # get a national NGM, calibrated to TP = 3.6, and retain calibration
-australia_ngm_unscaled <- get_australia_ngm_unscaled(model)
+australia_ngm_unscaled <- get_australia_ngm_unscaled(model, age_breaks)
 m <- find_m(3.6, australia_ngm_unscaled)
 australia_ngm <- australia_ngm_unscaled * m
 
 # get state-level next generation matrices, calibrated to the national estimate
-state_ngms_unscaled <- get_state_ngms_unscaled(model)
+state_ngms_unscaled <- get_state_ngms_unscaled(model, age_breaks)
 state_ngms <- lapply(state_ngms_unscaled, `*`, m)
 
 # get lga names

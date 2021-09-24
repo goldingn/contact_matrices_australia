@@ -7,7 +7,7 @@
 #' @return
 #' @author Nick Golding
 #' @export
-get_australia_ngm_unscaled <- function(model) {
+get_australia_ngm_unscaled <- function(model, age_breaks) {
 
   # unscaled next generation amtrix for all Australia
   
@@ -32,7 +32,7 @@ get_australia_ngm_unscaled <- function(model) {
         predict_setting_contacts(
           contact_model = model,
           population = population,
-          age_breaks = age_breaks_5y
+          age_breaks = age_breaks
         )
       ),
       setting_matrices = list(

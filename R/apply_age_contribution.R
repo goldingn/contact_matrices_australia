@@ -3,7 +3,7 @@
 #' .. content for \details{} ..
 #'
 #' @title
-#' @param contact_matrix
+#' @param matrix
 #' @param asymp_rel_infectious
 #' @return
 #' @author Nick Golding

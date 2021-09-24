@@ -30,6 +30,10 @@ get_age_contribution <- function(asymp_rel_infectious = 0.5) {
     "70+", "80+"
   )
   
+  if(!file.exists("data/susceptibility_clinical_fraction_age_Davies.csv")){
+    get_davies_fractions()
+  }
+  
   age_data_davies <- read_csv(
     "data/susceptibility_clinical_fraction_age_Davies.csv",
     col_types = cols(

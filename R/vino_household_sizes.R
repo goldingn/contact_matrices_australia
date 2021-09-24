@@ -3,7 +3,8 @@
 #' .. content for \details{} ..
 #'
 #' @title
-
+#' @param file
+#' @param by_room
 #' @return
 #' @author Nick Golding
 #' @export

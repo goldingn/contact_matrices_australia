@@ -6,8 +6,17 @@ age_breaks_5y <- c(seq(0, 80, by = 5), Inf)
 # fit contact model to polymod
 model <- fit_setting_contacts(
   get_polymod_setting_data(),
-  survey_population = get_polymod_population()
+  population = get_polymod_population()
 )
+
+# get a national NGM, calibrated to TP = 3.6, and retain calibration
+australia_ngm_unscaled <- get_australia_ngm_unscaled(model)
+m <- find_m(3.6, australia_ngm_unscaled)
+australia_ngm <- australia_ngm_unscaled * m
+
+# get state-level next generation matrices, calibrated to the national estimate
+state_ngms_unscaled <- get_state_ngms_unscaled(model)
+state_ngms <- lapply(state_ngms_unscaled, `*`, m)
 
 # get lga names
 abs_pop_age_lga_2020 %>%
@@ -76,32 +85,6 @@ lga_ngms_unscaled <- contact_matrices_all %>%
     apply_age_contribution
   )
 
-# get an Australia-wide unscaled NGM
-australia_ngm_unscaled <- conmat::abs_pop_age_lga_2020 %>%
-  group_by(age_group) %>%
-  summarise(
-    population = sum(population)
-  ) %>%
-  mutate(
-    lower.age.limit = readr::parse_number(as.character(age_group))
-  ) %>%
-  predict_setting_contacts(
-    contact_model = model,
-    age_breaks = age_breaks_5y
-  ) %>%
-  pluck(
-    "all"
-  ) %>%
-  apply_age_contribution()
-  
-# get calibration factor against a TP of 3.6 (partial TTIQ, baseline PHSM)
-m <- find_m(
-  R_target = 3.6,
-  transition_matrix = australia_ngm_unscaled
-)
-
-australia_ngm <- australia_ngm_unscaled * m
-
 # apply calibration to all LGA NGMs
 lga_ngms <- lga_ngms_unscaled %>%
   lapply(
@@ -117,9 +100,6 @@ lga_TPs <- lga_ngms_filter %>%
     get_R,
     FUN.VALUE = numeric(1)
   )
-
-# these are all a bit lower than national - we need to adjust the Australia-specifc
-# matrix for the Australia-wide mean household size
 
 # clear sign of difference by SEIFA status though!
 

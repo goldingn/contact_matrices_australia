@@ -11,7 +11,7 @@
 adjust_household_contact_matrix <- function(setting_matrices,
                                             household_size,
                                             population,
-                                            household_contact_rate = 0.9) {
+                                            household_contact_rate = 1) {
     
   # given a list of 4 setting-specific synthetic contact matrices (including
   # 'home'), and a mean household size, adjust the number of household

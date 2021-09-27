@@ -65,6 +65,16 @@ get_mean_household_size <- function(state = NULL, lga = NULL) {
     
   )
   
+  if (nrow(household_data) == 0) {
+    stop(
+      sprintf(
+        "%s '%s' not found",
+        level,
+        paste(get(level))[2]
+      )
+    )
+  }
+  
   # aggregate and average household sizes
   household_data %>%
     group_by(

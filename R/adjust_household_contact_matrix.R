@@ -11,41 +11,31 @@
 adjust_household_contact_matrix <- function(setting_matrices,
                                             household_size,
                                             population,
-                                            household_contact_rate = 1) {
+                                            household_contact_rate = 1,
+                                            model_mean_other_householders = 2.248971) {
     
+  # get the mean number of other household members from thpolymod data used to
+  # train the contact model
+  
+  # model_mean_other_householders <- socialmixr::polymod$participants %>%
+  #   mutate(
+  #     other_householders = hh_size - 1
+  #   ) %>%
+  #   summarise(
+  #     mean(other_householders)
+  #   )
+  
   # given a list of 4 setting-specific synthetic contact matrices (including
-  # 'home'), and a mean household size, adjust the number of household
-  # contacts to match the average household size in that LGA from ABS
+  # 'home'), and a mean household size, adjust the number of household contacts
+  # to match the average household size in that LGA from ABS, accounting for the
+  # fact that household contacts are proportional to (but not the same as) the
+  # number of other household members
   
-  # get population weights on each column of the matrix
-  max_age <- setting_matrices %>%
-    pluck("all") %>%
-    colnames() %>%
-    str_remove("[0-9]{2}\\)$") %>%
-    readr::parse_number() %>%
-    max()
-  population_weight <- population %>%
-    mutate(
-      lower = pmin(lower.age.limit, max_age)
-    ) %>%
-    group_by(lower) %>%
-    summarise(
-      population = sum(population)
-    ) %>%
-    mutate(
-      weight = population / sum(population)
-    ) %>%
-    arrange(lower) %>%
-    pull(weight)
-  
-  # get ratio between household matrix average household contacts and that
-  # expected from the average household size
-  expected_home_contacts <- household_contact_rate * (household_size - 1)
-  matrix_home_contacts <- weighted.mean(
-    colSums(setting_matrices$home),
-    population_weight
-  )
-  ratio <- expected_home_contacts / matrix_home_contacts
+  # get ratio between expected number of other household members (household size
+  # minus 1) for this place from ABS data, and the average from the data used to
+  # train the model
+  expected_other_householders <- household_contact_rate * (household_size - 1)
+  ratio <- expected_other_householders / model_mean_other_householders
 
   # adjust home matrix and recompute all matrix
   settings <- setdiff(names(setting_matrices), "all")

@@ -250,7 +250,7 @@ household_correction_factor_5y <- household_correction_factor_broad %>%
   conmat::predictions_to_matrix()
   
 # compare the number of social (non-household, non-work, non-school) contacts of
-# at lleast 1h from the CAMP-remote study (median 2) to a comparable subset
+# at least 1h from the CAMP-remote study (median 2) to a comparable subset
 # (women aged 17-37) of the polymod survey population
 
 # female polymod respondents aged 17-37 (comparable to CAMP-remote)

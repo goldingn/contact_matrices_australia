@@ -6,36 +6,15 @@
 # 2. re-calibrate household contacts based on household age structures with
 # broad age groups from Vino et al.
 
-# 3. re-calibrate workplace contacts based on employment in NT remote regions
-# (vs NSW as proxy for polymod)
+# 3. check school, work, and other contacts relative to contact
+# surveys/Australia
 
-# 4. re-calibrate school contacts based on school attendance in NT ATSI
-# populations (vs NSW as proxy for polymod)
+# 4. compute R0, TP, and vaccination effects in these communities
 
-# 5. re-calibrate other non-household contacts based on CAMP-remote study (vs
-# polymod equivaent age/gender group)
+# 5. plot these a la national plan figure
 
 # get population distribution for health districts in NT
 age_limits_5y <- c(seq(0, 80, by = 5), Inf)
-
-# get aboriginal populations in NT health districts
-nt_lhd_aboriginal_pop <- get_nt_lhd_aboriginal_pop()
-
-# look at age distributions
-nt_lhd_aboriginal_pop %>%
-  ggplot(
-    aes(
-      x = lower.age.limit,
-      y = population
-    )
-  ) +
-  geom_col() +
-  facet_wrap(
-    ~district,
-    scales = "free_y"
-  ) +
-  theme_minimal()
-
 
 # fit contact model to polymod
 model <- fit_setting_contacts(
@@ -47,13 +26,13 @@ model <- fit_setting_contacts(
 # to these population age distributions
 remote_matrix_naive <- conmat::predict_setting_contacts(
   contact_model = model,
-  population = nt_remote_aboriginal_pop,
+  population = get_nt_remote_aboriginal_pop(),
   age_breaks = age_limits_5y
 )
 
 urban_matrix_naive <- conmat::predict_setting_contacts(
   contact_model = model,
-  population = alice_urban_aboriginal_pop,
+  population = get_nt_urban_aboriginal_pop(),
   age_breaks = age_limits_5y
 )
 
@@ -283,8 +262,12 @@ australia_ngm_unscaled <- get_australia_ngm_unscaled(
   model,
   age_breaks = age_limits_5y
 )
+
+optimal_ttiq_baseline <- 2.93
+partial_ttiq_baseline <- 3.62
+
 m <- find_m(
-  R_target = 3.6,
+  R_target = partial_ttiq_baseline,
   transition_matrix = australia_ngm_unscaled
 )
 australia_ngm <- australia_ngm_unscaled * m
@@ -303,11 +286,15 @@ remote_nt_ngm <- remote_nt_ngm_unscaled * m
 urban_nt_ngm_unscaled <- apply_age_contribution(urban_matrix_updated$all)
 urban_nt_ngm <- urban_nt_ngm_unscaled * m
 
-# apply vacciantion effect
+# apply vaccinqtion effect
 national_plan_vaccination <- readRDS("data/vacc_effect_by_age_scenario_19.RDS") %>%
   ungroup() %>%
+  filter(
+    vacc_schoolkids
+  ) %>%
   select(
     -vacc_scenario,
+    -vacc_schoolkids,
     -vacc_relative_efficacy
   )
 
@@ -317,7 +304,6 @@ combine_efficacy <- function(infection, transmission) {
 }
 efficacy_az_2_dose <- combine_efficacy(0.60, 0.65)
 efficacy_pf_2_dose <- combine_efficacy(0.79, 0.65)
-
 
 australia_pop_fun <- abs_state_age %>%
   group_by(age_group) %>%
@@ -374,7 +360,6 @@ fraction_eligible_lookup <- tibble(
     
 aspirational_vaccination <- expand_grid(
   vacc_coverage = c(0.9, 1),
-  vacc_schoolkids = TRUE,
   age_band_5y = unique(national_plan_vaccination$age_band_5y)
 ) %>%
   left_join(
@@ -397,17 +382,17 @@ aspirational_vaccination <- expand_grid(
   )
 
 # apply vaccination
-
-aboriginal_tps <- bind_rows(
+aboriginal_tp_partial <- bind_rows(
   national_plan_vaccination,
   aspirational_vaccination
 ) %>%
-  group_by(vacc_coverage, vacc_schoolkids) %>%
+  group_by(vacc_coverage) %>%
   summarise(
     australia_tp_reduction = vacc_tp_reduction(vacc_effect, australia_ngm),
     nt_tp_reduction = vacc_tp_reduction(vacc_effect, nt_ngm),
-    remote_aboriginal_tp_reduction = vacc_tp_reduction(vacc_effect, remote_nt_ngm),
-    urban_aboriginal_tp_reduction = vacc_tp_reduction(vacc_effect, urban_nt_ngm),
+    nt_remote_aboriginal_tp_reduction = vacc_tp_reduction(vacc_effect, remote_nt_ngm),
+    nt_urban_aboriginal_tp_reduction = vacc_tp_reduction(vacc_effect, urban_nt_ngm),
+    .groups = "drop"
   ) %>%
   pivot_longer(
     ends_with("reduction"),
@@ -419,28 +404,160 @@ aboriginal_tps <- bind_rows(
     tp_percent_reduction = 100 * (1 - tp_multiplier)
   ) %>%
   arrange(
-    vacc_schoolkids,
     vacc_coverage,
     population_group
   ) %>%
   mutate(
-    starting_tp = case_when(
+    tp_baseline = case_when(
       population_group == "australia" ~ get_R(australia_ngm),
       population_group == "nt" ~ get_R(nt_ngm),
-      population_group == "remote_aboriginal" ~ get_R(remote_nt_ngm),
-      population_group == "urban_aboriginal" ~ get_R(urban_nt_ngm)
+      population_group == "nt_remote_aboriginal" ~ get_R(remote_nt_ngm),
+      population_group == "nt_urban_aboriginal" ~ get_R(urban_nt_ngm)
     ),
     .before = tp_multiplier
   ) %>%
   mutate(
-    R0 = 8 * starting_tp / 3.6,
-    .before = starting_tp
+    r0 = 8 * tp_baseline / partial_ttiq_baseline,
+    .before = tp_baseline
   ) %>%
   mutate(
-    post_vacc_tp = starting_tp * tp_multiplier
+    post_vacc_tp = tp_baseline * tp_multiplier
   ) %>%
-  select(-tp_multiplier) %>%
-  print(n = Inf)
-  
+  select(
+    -tp_multiplier
+  ) %>%
+  mutate(
+    scenario = case_when(
+      population_group == "australia" ~ "All\nAustralia\n",
+      population_group == "nt" ~ "All\nNT\n",
+      population_group == "nt_remote_aboriginal" ~ "NT\nremote\naboriginal",
+      population_group == "nt_urban_aboriginal" ~ "NT\nurban\naboriginal"
+    ),
+    scenario = factor(
+      scenario,
+      levels = c(
+        "All\nAustralia\n",
+        "All\nNT\n",
+        "NT\nremote\naboriginal",
+        "NT\nurban\naboriginal"
+      )
+    )
+  )
+
+aboriginal_tp_optimal <- aboriginal_tp_partial %>%
+   mutate(
+     across(
+       c(tp_baseline, post_vacc_tp),
+       ~ . * optimal_ttiq_baseline / partial_ttiq_baseline
+     ),
+     tp_percent_reduction = 100 * (1 - post_vacc_tp / tp_baseline),
+   )
+
+aboriginal_tp <- bind_rows(
+  optimal = aboriginal_tp_optimal,
+  partial = aboriginal_tp_partial,
+  .id = "ttiq"
+)
+
+saveRDS(
+  aboriginal_tp,
+  file = "outputs/aboriginal_tp.RDS"
+)
+
+aboriginal_tp <- readRDS(
+  file = "outputs/aboriginal_tp.RDS"
+)
+
+colours <- RColorBrewer::brewer.pal(3, "Set2")
+
+baseline_colour <- washout(colours[2], 0.8)
+vaccine_colours <- washout(colours[1], c(0.7, 0.5, 0.25, 0.1))
+
+border_colour <- grey(0.6)
+r0_colour <- grey(0.5)
+label_colour <- grey(0.3)
+text_size <- 2.5
 
 
+ttiq_plot <- "optimal"
+first_scenario <- levels(aboriginal_tp$scenario)[1]
+aboriginal_tp %>%
+  filter(
+    ttiq == ttiq_plot
+  ) %>%
+  select(
+    -tp_percent_reduction
+  ) %>%
+  pivot_wider(
+    names_from = vacc_coverage,
+    values_from = post_vacc_tp,
+    names_prefix = "tp_coverage_"
+  ) %>%
+  control_base_plot() %>%
+  add_context_hline(
+    label = "Control",
+    at = 1,
+    linetype = 2,
+    text_size = text_size * 1.3
+  ) %>%
+  add_context_hline(
+    label = "Delta R0 (for Australia)",
+    at = 8,
+    linetype = 2,
+    text_size = text_size * 1.3
+  ) %>%
+  # add the vaccination + ttiq effect as a box
+  add_single_box(
+    top = r0,
+    bottom = tp_baseline,
+    box_colour = baseline_colour,
+    only_scenarios = first_scenario,
+    text_main = paste0(
+      "baseline\nPHSM\n&\n",
+      ttiq_plot,
+      "\nTTIQ"
+    )
+  ) %>%
+  add_single_box(
+    top = tp_baseline,
+    bottom = tp_coverage_0.7,
+    box_colour = vaccine_colours[1],
+    text_main = "70%\nvaccination\ncoverage",
+    only_scenarios = first_scenario
+  ) %>%
+  add_stacked_box(
+    top = tp_coverage_0.7,
+    bottom = tp_coverage_0.8,
+    reference = tp_baseline_vacc,
+    text_main = "80%",
+    only_scenarios = first_scenario,
+    box_colour = vaccine_colours[2]
+  ) %>%
+  add_stacked_box(
+    top = tp_coverage_0.8,
+    bottom = tp_coverage_0.9,
+    reference = tp_baseline_vacc,
+    text_main = "90%",
+    only_scenarios = first_scenario,
+    box_colour = vaccine_colours[3]
+  ) %>%
+  add_stacked_box(
+    top = tp_coverage_0.9,
+    bottom = tp_coverage_1,
+    reference = tp_baseline_vacc,
+    text_main = "100%",
+    only_scenarios = first_scenario,
+    box_colour = vaccine_colours[4]
+  ) %>%
+  add_arrow(8) +
+  theme(
+    axis.text.x = element_text(
+      size = 10,
+      colour = grey(0.1)
+    )
+  )
+
+ggsave("outputs/aboriginal_tp_figure.png",
+       bg = "white",
+       width = 8,
+       height = 6)

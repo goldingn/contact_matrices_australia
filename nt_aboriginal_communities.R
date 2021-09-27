@@ -36,17 +36,6 @@ nt_lhd_aboriginal_pop %>%
   ) +
   theme_minimal()
 
-# extrapolate a matrix to all remote districts
-nt_remote_aboriginal_pop <- nt_lhd_aboriginal_pop %>%
-  filter(
-    !(district %in% c("Alice Springs Urban", "Darwin/Casuarina"))
-  ) %>%
-  group_by(
-    lower.age.limit
-  ) %>%
-  summarise(
-    population = sum(population)
-  )
 
 # fit contact model to polymod
 model <- fit_setting_contacts(
@@ -55,199 +44,41 @@ model <- fit_setting_contacts(
 )
 
 # extrapolate (naive) setting-specific synthetic contact matrices from polymod
-# to this population age distribution
+# to these population age distributions
 remote_matrix_naive <- conmat::predict_setting_contacts(
   contact_model = model,
   population = nt_remote_aboriginal_pop,
   age_breaks = age_limits_5y
 )
 
+urban_matrix_naive <- conmat::predict_setting_contacts(
+  contact_model = model,
+  population = alice_urban_aboriginal_pop,
+  age_breaks = age_limits_5y
+)
+
 # 2. re-calibrate household contacts with data from Vino et al.
 
-age_limits_broad <- c(0, 5, 16, Inf)
-
-# first, get the extrapolated household matrix in these broad age groups
-remote_matrix_naive_broad <- nt_remote_aboriginal_pop %>%
-  conmat::extrapolate_polymod(
-    age_breaks = age_limits_broad
-  )
-
-# load Vino et al. household data for remote communities, and aggregate sexes
-remote_households <- vino_household_sizes() %>%
-  group_by(
-    idnum, 
-    shire,
-    rem_urb,
-    respondent_age,
-    age
-  ) %>%
-  summarise(
-    count = sum(count),
-    across(
-      c(overall_no, n_rooms),
-      first
-    ),
-    .groups = "drop"
-  ) %>%
-  filter(
-    rem_urb == "ABC remote"
-  ) %>%
-  select(
-    -rem_urb
-  ) %>%
-  # drop the Tiwi islands - economically quite different and seemingly a saller
-  # household size than the mainland
-  filter(
-    shire != "Tiwi Islands"
-  )
-
-# # 1511 people in 185 households
-# sum(remote_households$count)
-# n_distinct(remote_households$idnum)
-# 
-# # comparable household sizes (7-8) and densities (~3 per room)
-# remote_households %>%
-#   group_by(idnum, shire) %>%
-#   summarise(
-#     count = sum(count),
-#     n_rooms = first(n_rooms),
-#     .groups = "drop"
-#   ) %>%
-#   mutate(
-#     density = count / n_rooms
-#   ) %>%
-#   group_by(
-#     shire
-#   ) %>%
-#   summarise(
-#     across(
-#       c(count, n_rooms, density),
-#       mean
-#     )
-#   )
-
-# matrix in original broad groups
-remote_household_matrix_broad <- remote_households %>%
-  select(
-    -shire,
-    -n_rooms,
-    -overall_no
-  ) %>%
-  rename(
-    age_to = age
-  ) %>%
-  right_join(
-    expand_grid(
-      age_from = c("baby", "child", "adult"),
-      age_to = c("baby", "child", "adult")
-    ),
-    by = "age_to"
-  ) %>%
-  relocate(idnum, age_from, age_to, count) %>%
-  arrange(idnum, age_from, age_to) %>%
-  mutate(
-    count = ifelse(
-      age_from == age_to,
-      pmax(0, count - 1),
-      count
-    )
-  ) %>%
-  mutate(
-    across(
-      c(age_from, age_to),
-      ~factor(.x, levels = c("baby", "child", "adult"))
-    )
-  ) %>%
-  group_by(
-    age_from, age_to
-  ) %>%
-  summarise(
-    count = mean(count),
-    .groups = "drop"
-  ) %>%
-  pivot_wider(
-    names_from = age_to,
-    values_from = count
-  ) %>%
-  tibble::column_to_rownames(
-    "age_from"
-  ) %>%
-  as.matrix()
-
-# plot these two against one another (not different scales and different broad
-# mixing patterns)
-plot_matrix(remote_matrix_naive_broad$home) +
-  ggtitle("polymod extrapolated") +
-plot_matrix(remote_household_matrix_broad) +
-  ggtitle("Vino et al")
-
-# lookup from broad age groups to integer years, to reaggregate correction
-# factors at 5y intervals
-age_group_lookup_broad <- tibble(
-  age =  0:100
-) %>%
-  mutate(
-    age_group = case_when(
-      age < 5 ~ "baby",
-      age < 16 ~ "child",
-      TRUE ~ "adult"
-    )
-  )
-
-# population age distribution function for aboriginal
-nt_remote_aboriginal_pop_fun <- get_nt_aboriginal_pop_function(remote = TRUE)
+# make the household contacts match the number of people who slept there last
+# night. Note that for polymod (and LGA level analyses) the mean  number of
+# contacts at home is generally larger than the mean number of other household
+# members, however given the more fluid nature of household structure in
+# aboriginal communities (and hence the household definition in Vino et al.
+# being people who slept in the house the previous night), we do not apply a
+# correction factor to increase the number of contacts at home.
 
 # get household correction factors, at 5y level
-household_correction_factor_broad <- remote_household_matrix_broad / remote_matrix_naive_broad$home
-household_correction_factor_5y <- household_correction_factor_broad %>%
-  conmat::matrix_to_predictions() %>%
-  rename(
-    correction = contacts
-  ) %>%
-  right_join(
-    age_group_lookup_broad,
-    by = c(age_group_from = "age_group")
-  ) %>%
-  rename(
-    age_from = age
-  ) %>%
-  right_join(
-    age_group_lookup_broad,
-    by = c(age_group_to = "age_group")
-  ) %>%
-  rename(
-    age_to = age
-  ) %>%
-  select(
-    -starts_with("age_group")
-  ) %>%
-  mutate(
-    age_group_to = cut(
-      pmax(0.1, age_to),
-      age_limits_5y,
-      right = FALSE
-    ),
-    age_group_from = cut(
-      pmax(0.1, age_from),
-      age_limits_5y,
-      right = FALSE
-    ),
-    population_from = nt_remote_aboriginal_pop_fun(age_from),
-    population_to = nt_remote_aboriginal_pop_fun(age_to),
-    population_interaction = population_from + population_to
-  ) %>%
-  group_by(age_group_to, age_group_from) %>%
-  summarise(
-    correction = weighted.mean(
-      x = correction,
-      w = population_interaction
-    ),
-    .groups = "drop"
-  ) %>%
-  rename(
-    contacts = correction
-  ) %>%
-  conmat::predictions_to_matrix()
+remote_household_correction_factor_5y <- aboriginal_household_correction_factor_5y(
+  contact_model = model, 
+  age_breaks = age_limits_5y,
+  remote = TRUE
+)
+
+urban_household_correction_factor_5y <- aboriginal_household_correction_factor_5y(
+  contact_model = model,
+  age_breaks = age_limits_5y,
+  remote = FALSE
+)
   
 # compare the number of social (non-household, non-work, non-school) contacts of
 # at least 1h from the CAMP-remote study (median 2) to a comparable subset
@@ -406,7 +237,10 @@ school_ratio <- conmat::abs_education_state %>%
 
 # apply the household contact correction matrix
 remote_matrix_updated <- remote_matrix_naive
-remote_matrix_updated$home <- remote_matrix_naive$home * household_correction_factor_5y
+remote_matrix_updated$home <- remote_matrix_naive$home * remote_household_correction_factor_5y
+
+urban_matrix_updated <- urban_matrix_naive
+urban_matrix_updated$home <- urban_matrix_naive$home * urban_household_correction_factor_5y
 
 # employment rate in remote NT is approximately 47% of the NSW population that
 # is broadly representative of polymod
@@ -425,9 +259,18 @@ school_ratio
 remote_matrix_updated$all <- with(remote_matrix_updated,
                                   home + school + work + other)
 
+urban_matrix_updated$all <- with(urban_matrix_updated,
+                                 home + school + work + other)
+
 # plot setting-sepcific matrices before and after updating
 plot_setting_matrices(remote_matrix_naive)
 plot_setting_matrices(remote_matrix_updated)
+
+plot_setting_matrices(urban_matrix_naive)
+plot_setting_matrices(urban_matrix_updated)
+
+get_R(urban_matrix_naive$all)
+get_R(urban_matrix_updated$all)
 
 # plot overall contact matrices
 plot_matrix(remote_matrix_naive$all) +
@@ -457,6 +300,8 @@ nt_ngm <- state_ngms$NT
 remote_nt_ngm_unscaled <- apply_age_contribution(remote_matrix_updated$all)
 remote_nt_ngm <- remote_nt_ngm_unscaled * m
 
+urban_nt_ngm_unscaled <- apply_age_contribution(urban_matrix_updated$all)
+urban_nt_ngm <- urban_nt_ngm_unscaled * m
 
 # apply vaccination
 readRDS("data/vacc_effect_by_age_scenario_19.RDS") %>%
@@ -464,7 +309,8 @@ readRDS("data/vacc_effect_by_age_scenario_19.RDS") %>%
   summarise(
     australia_tp_reduction = vacc_tp_reduction(vacc_effect, australia_ngm),
     nt_tp_reduction = vacc_tp_reduction(vacc_effect, nt_ngm),
-    remote_nt_tp_reduction = vacc_tp_reduction(vacc_effect, remote_nt_ngm)
+    remote_aboriginal_tp_reduction = vacc_tp_reduction(vacc_effect, remote_nt_ngm),
+    urban_aboriginal_tp_reduction = vacc_tp_reduction(vacc_effect, urban_nt_ngm),
   ) %>%
   pivot_longer(
     ends_with("reduction"),
@@ -484,10 +330,19 @@ readRDS("data/vacc_effect_by_age_scenario_19.RDS") %>%
     starting_tp = case_when(
       population_group == "australia" ~ get_R(australia_ngm),
       population_group == "nt" ~ get_R(nt_ngm),
-      population_group == "remote_nt" ~ get_R(remote_nt_ngm)
+      population_group == "remote_aboriginal" ~ get_R(remote_nt_ngm),
+      population_group == "urban_aboriginal" ~ get_R(urban_nt_ngm)
     ),
+    .before = tp_multiplier
+  ) %>%
+  mutate(
+    R0 = 8 * starting_tp / 3.6,
+    .before = starting_tp
+  ) %>%
+  mutate(
     post_vacc_tp = starting_tp * tp_multiplier
   ) %>%
+  select(-tp_multiplier) %>%
   print(n = Inf)
   
 

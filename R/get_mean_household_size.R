@@ -20,6 +20,10 @@ get_mean_household_size <- function(state = NULL, lga = NULL) {
     stop ("only one of state and lga may be specified")
   }
   
+  if (length(state) > 1 | length(lga) > 1) {
+    stop ("only one state or LGA at a time, please")
+  }
+  
   # given ABS data on household sizes for a *single location*, get average
   # household sizes *per person* from ABS - assuming a max of 8 people per
   # households. Note - I tried computing the mean size of the households larger

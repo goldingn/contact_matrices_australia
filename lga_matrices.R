@@ -22,11 +22,11 @@ test_lgas <- c(
 # get the naive matrices based on population sizes
 lga_matrices_naive <- abs_lga_lookup %>%
   # temporary to get subset of LGAs for testing
-  # filter(state == "NSW" | state == "VIC") %>%
+  filter(state == "NSW" | state == "VIC") %>%
   # group_by(state) %>%
   # filter(row_number() <= 3) %>%
   # ungroup %>%
-  filter(lga %in% test_lgas) %>%
+  # filter(lga %in% test_lgas) %>%
   #
   mutate(
     pop_mat = map(
@@ -74,6 +74,8 @@ lga_matrices_naive %>%
   theme_minimal() +
   scale_fill_manual(values = state_cols)
 
+# lga_hh_size_mean() calculates the average household size in each LGA
+# plot histogram of mean household size in lga by state
 ggplot(
   data  = lga_hh_size_mean() %>%
     filter(state == "VIC" | state == "NSW")
@@ -92,29 +94,11 @@ ggplot(
   ) +
   scale_fill_manual(values = state_cols)
 
-# lga_hh_size_mean() calculates the average household size in each LGA
-# plot histogram of mean household size in lga by state
-lga_matrices_naive %>%
-  left_join(
-    y = lga_hh_size_mean(),
-    by = c("state", "lga")
-  ) %>%
-  rowwise %>%
-  mutate(
-    hh_matrix = pmap(
-      .l = list(
-        pop_mat = pop_mat,
-        naive_matrix = naive_matrix,
-        mean_hh_size = mean_hh_size,
-        age_limits = age_limits_5y
-      ),
-      .f = correct_hh_matrix_by_mean
-    )
-  )
 
 
 # get corrected household contact matrix by mean
-corrected_hh_matrices <- lga_matrices_naive %$%
+corrected_hh_matrices <- lga_matrices_naive %>%
+  filter%$%
   mapply(
     FUN = correct_hh_matrix_by_mean,
     pop_mat = pop_mat,
@@ -148,9 +132,13 @@ contact_matrices <- lga_matrices_naive %>%
       }
     )
   ) %>%
+  filter(!is.na(mean_hh_size)) %>%
   dplyr::select(state, lga, contact_matrices)
 
-
+saveRDS(
+  contact_matrices,
+  "outputs/lga_contact_matrices.RDS"
+)
 
 # convert to a next generation matrix
 

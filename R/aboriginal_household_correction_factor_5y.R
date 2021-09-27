@@ -14,32 +14,12 @@ aboriginal_household_correction_factor_5y <- function(contact_model, age_breaks,
   # get population age distribution
   if (remote) {
     
-    # aboriginal population in all remote districts
-    population <- nt_lhd_aboriginal_pop %>%
-      filter(
-        !(district %in% c("Alice Springs Urban", "Darwin/Casuarina"))
-      ) %>%
-      group_by(
-        lower.age.limit
-      ) %>%
-      summarise(
-        population = sum(population)
-      )
+    population <- get_nt_remote_aboriginal_pop()
     
   } else {
     
-    # aboriginal population in urban alice springs
-    population <- nt_lhd_aboriginal_pop %>%
-      filter(
-        district == "Alice Springs Urban"
-      ) %>%
-      group_by(
-        lower.age.limit
-      ) %>%
-      summarise(
-        population = sum(population)
-      )
-    
+    population <- get_nt_urban_aboriginal_pop()
+
   }
   
   # convert to a function (1y age bins)

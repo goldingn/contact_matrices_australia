@@ -303,8 +303,105 @@ remote_nt_ngm <- remote_nt_ngm_unscaled * m
 urban_nt_ngm_unscaled <- apply_age_contribution(urban_matrix_updated$all)
 urban_nt_ngm <- urban_nt_ngm_unscaled * m
 
+# apply vacciantion effect
+national_plan_vaccination <- readRDS("data/vacc_effect_by_age_scenario_19.RDS") %>%
+  ungroup() %>%
+  select(
+    -vacc_scenario,
+    -vacc_relative_efficacy
+  )
+
+# define aspirational coverage assumptions: 90%, 100%, with and without kids, with full double dose coverage
+combine_efficacy <- function(infection, transmission) {
+  1 - ((1 - infection) * (1 - transmission)) 
+}
+efficacy_az_2_dose <- combine_efficacy(0.60, 0.65)
+efficacy_pf_2_dose <- combine_efficacy(0.79, 0.65)
+
+
+australia_pop_fun <- abs_state_age %>%
+  group_by(age_group) %>%
+  summarise(
+    population = sum(population)
+  ) %>%
+  mutate(
+    lower.age.limit = readr::parse_number(as.character(age_group))
+  ) %>%
+  conmat::get_age_population_function()
+
+nt_pop_fun <- abs_state_age %>%
+  filter(
+    state == "NT"
+  ) %>%
+  mutate(
+    lower.age.limit = readr::parse_number(as.character(age_group))
+  ) %>%
+  conmat::get_age_population_function()
+
+nt_remote_aboriginal_pop_fun <- get_nt_remote_aboriginal_pop() %>%
+  get_age_population_function()
+
+nt_urban_aboriginal_pop_fun <- get_nt_urban_aboriginal_pop() %>%
+  get_age_population_function()
+
+fraction_eligible_lookup <- tibble(
+  age = 0:100
+) %>%
+  mutate(
+    lower = pmin(5 * age %/% 5, 80),
+    upper = lower + 4,
+    lower = as.character(lower),
+    upper = paste0("-", upper),
+    upper = str_replace(upper, "-84", "+"),
+    age_band_5y = paste0(lower, upper),
+    age_band_5y = factor(
+      age_band_5y,
+      levels = levels(national_plan_vaccination$age_band_5y)
+    )
+  ) %>%
+  select(-lower, -upper) %>%
+  mutate(
+    population = australia_pop_fun(age),
+  ) %>%
+  mutate(
+    eligible = age >= 12
+  ) %>%
+  group_by(age_band_5y) %>%
+  summarise(
+    fraction_eligible = sum(population * eligible) / sum(population),
+    .groups = "drop"
+  )
+    
+aspirational_vaccination <- expand_grid(
+  vacc_coverage = c(0.9, 1),
+  vacc_schoolkids = TRUE,
+  age_band_5y = unique(national_plan_vaccination$age_band_5y)
+) %>%
+  left_join(
+    fraction_eligible_lookup,
+    by = c("age_band_5y")
+  ) %>%
+  # add on average efficacy on transmission, given an assumed AZ/Pfizer mix, based on age groups
+  mutate(
+    fraction_pfizer = case_when(
+      age_band_5y %in% c("60-64", "65-69", "70-74", "75-79", "80+") ~ 1,
+      TRUE ~ 1
+    ),
+    average_efficacy_transmission = fraction_pfizer * efficacy_pf_2_dose + (1 - fraction_pfizer) * efficacy_az_2_dose,
+    proportion_vaccinated = vacc_coverage * fraction_eligible,
+    vacc_effect = 1 - proportion_vaccinated * average_efficacy_transmission
+  ) %>%
+  select(
+    -fraction_eligible,
+    -fraction_pfizer
+  )
+
 # apply vaccination
-readRDS("data/vacc_effect_by_age_scenario_19.RDS") %>%
+
+aboriginal_tps <- bind_rows(
+  national_plan_vaccination,
+  aspirational_vaccination
+) %>%
   group_by(vacc_coverage, vacc_schoolkids) %>%
   summarise(
     australia_tp_reduction = vacc_tp_reduction(vacc_effect, australia_ngm),

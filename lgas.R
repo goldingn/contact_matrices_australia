@@ -10,19 +10,25 @@ model <- fit_setting_contacts(
 )
 
 # get a national NGM, calibrated to TP = 3.6, and retain calibration
-australia_ngm_unscaled <- get_australia_ngm_unscaled(model, age_breaks)
+australia_ngm_unscaled <- get_australia_ngm_unscaled(
+  model = model,
+  age_breaks = age_breaks_5y
+)
 m <- find_m(3.6, australia_ngm_unscaled)
 australia_ngm <- australia_ngm_unscaled * m
 
 # get state-level next generation matrices, calibrated to the national estimate
-state_ngms_unscaled <- get_state_ngms_unscaled(model, age_breaks)
+state_ngms_unscaled <- get_state_ngms_unscaled(
+  model = model,
+  age_breaks = age_breaks_5y
+)
 state_ngms <- lapply(state_ngms_unscaled, `*`, m)
 
-# get lga names
-abs_pop_age_lga_2020 %>%
-  filter(state == "VIC") %>%
-  distinct(lga) %>%
-  pull(lga)
+# # get lga names
+# abs_pop_age_lga_2020 %>%
+#   filter(state == "VIC") %>%
+#   distinct(lga) %>%
+#   pull(lga)
 
 # lgas we are interested in
 lgas <- c(
@@ -44,53 +50,54 @@ lgairsad <- fread("data/lga_irsad.csv") %>% janitor::clean_names()
 lgas <- unique(lgairsad$lga)
 lgas <- lgas[lgas %in% abs_lga_lookup$lga][!lgas %like% "Unincorp"]
 
-# loop through named lgas getting setting-specific synthetic contact matrices,
-# accounting for population age distributions and household sizes
-contact_matrices <- lgas %>%
-  set_names(
-    lgas
+lga_ngms_unscaled <- tibble(
+  lga = lgas
+) %>%
+  rowwise() %>%
+  mutate(
+    household_size = get_mean_household_size(
+      lga = lga
+    ),
+    population = list(
+      abs_age_lga(lga)
+    ),
+    setting_matrices = list(
+      predict_setting_contacts(
+        contact_model = model,
+        population = population,
+        age_breaks = age_breaks_5y
+      )
+    )
   ) %>%
-  # getting population age distributions from ABS
-  lapply(
-    FUN = abs_age_lga
+  mutate(
+    setting_matrices = list(
+      adjust_household_contact_matrix(
+        setting_matrices = setting_matrices,
+        household_size = household_size,
+        population = population
+      )
+    ),
+    contact_matrix = list(
+      pluck(setting_matrices, "all")
+    ),
+    ngm_unscaled = list(
+      apply_age_contribution(
+        contact_matrix
+      )
+    )
   ) %>%
-  # getting contact matrices
-  lapply(
-    FUN = predict_setting_contacts,
-    X = .,
-    contact_model = model,
-    age_breaks = age_breaks_5y
+  select(
+    lga, ngm_unscaled
   ) %>%
-  # adjusting the number of household contacts for the ABS household sizes for
-  # that LGA
-  adjust_household_contacts()
-
-# # plot these
-# plot_setting_matrices(matrices$`Northern Beaches (A)`)
-# plot_setting_matrices(matrices$`Fairfield (C)`)
-# plot_matrix(matrices$`Northern Beaches (A)`$all)
-# plot_matrix(matrices$`Fairfield (C)`$all)
-
-# get the 'all contacts' matrices for each
-contact_matrices_all <- contact_matrices %>%
-  lapply(
-    pluck,
-    "all"
-  )
-
-# get unscaled (to R) next generation matrices for these, by adjusting for
-# age-specific relative susceptibility and onward transmission
-lga_ngms_unscaled <- contact_matrices_all %>%
-  lapply(
-    apply_age_contribution
-  )
+  pivot_wider(
+    names_from = lga,
+    values_from = ngm_unscaled
+  ) %>%
+  as.list() %>%
+  lapply(`[[`, 1)
 
 # apply calibration to all LGA NGMs
-lga_ngms <- lga_ngms_unscaled %>%
-  lapply(
-    `*`,
-    m
-  )
+lga_ngms <- lapply(lga_ngms_unscaled, `*`, m)
 
 lga_ngms_filter <- lga_ngms[!(lga_ngms %>% sapply(function(x) any(is.nan(x))))]
 

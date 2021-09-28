@@ -428,18 +428,18 @@ aboriginal_tp_partial <- bind_rows(
   ) %>%
   mutate(
     scenario = case_when(
-      population_group == "australia" ~ "All\nAustralia\n",
-      population_group == "nt" ~ "All\nNT\n",
-      population_group == "nt_remote_aboriginal" ~ "NT\nremote\naboriginal",
-      population_group == "nt_urban_aboriginal" ~ "NT\nurban\naboriginal"
+      population_group == "australia" ~ "All\nAustralia",
+      population_group == "nt" ~ "All\nNT",
+      population_group == "nt_remote_aboriginal" ~ "Remote\nIndigenous",
+      population_group == "nt_urban_aboriginal" ~ "Urban\nIndigenous"
     ),
     scenario = factor(
       scenario,
       levels = c(
-        "All\nAustralia\n",
-        "All\nNT\n",
-        "NT\nremote\naboriginal",
-        "NT\nurban\naboriginal"
+        "All\nAustralia",
+        "All\nNT",
+        "Remote\nIndigenous",
+        "Urban\nIndigenous"
       )
     )
   )
@@ -471,93 +471,97 @@ aboriginal_tp <- readRDS(
 colours <- RColorBrewer::brewer.pal(3, "Set2")
 
 baseline_colour <- washout(colours[2], 0.8)
-vaccine_colours <- washout(colours[1], c(0.7, 0.5, 0.25, 0.1))
+vaccine_colours <- washout(colours[3], c(0.7, 0.5, 0.25, 0.1))
 
 border_colour <- grey(0.6)
 r0_colour <- grey(0.5)
 label_colour <- grey(0.3)
 text_size <- 2.5
 
-
-ttiq_plot <- "optimal"
-first_scenario <- levels(aboriginal_tp$scenario)[1]
-aboriginal_tp %>%
-  filter(
-    ttiq == ttiq_plot
-  ) %>%
-  select(
-    -tp_percent_reduction
-  ) %>%
-  pivot_wider(
-    names_from = vacc_coverage,
-    values_from = post_vacc_tp,
-    names_prefix = "tp_coverage_"
-  ) %>%
-  control_base_plot() %>%
-  add_context_hline(
-    label = "Control",
-    at = 1,
-    linetype = 2,
-    text_size = text_size * 1.3
-  ) %>%
-  add_context_hline(
-    label = "Delta R0 (for Australia)",
-    at = 8,
-    linetype = 2,
-    text_size = text_size * 1.3
-  ) %>%
-  # add the vaccination + ttiq effect as a box
-  add_single_box(
-    top = r0,
-    bottom = tp_baseline,
-    box_colour = baseline_colour,
-    only_scenarios = first_scenario,
-    text_main = paste0(
-      "baseline\nPHSM\n&\n",
-      ttiq_plot,
-      "\nTTIQ"
+for (ttiq_plot in c("partial", "optimal")) {
+  
+  first_scenario <- levels(aboriginal_tp$scenario)[1]
+  aboriginal_tp %>%
+    filter(
+      ttiq == ttiq_plot
+    ) %>%
+    select(
+      -tp_percent_reduction
+    ) %>%
+    pivot_wider(
+      names_from = vacc_coverage,
+      values_from = post_vacc_tp,
+      names_prefix = "tp_coverage_"
+    ) %>%
+    control_base_plot() %>%
+    add_context_hline(
+      label = "Control",
+      at = 1,
+      linetype = 2,
+      text_size = text_size * 1.3
+    ) %>%
+    add_context_hline(
+      label = "Delta R0 (for Australia)",
+      at = 8,
+      linetype = 2,
+      text_size = text_size * 1.3
+    ) %>%
+    # add the vaccination + ttiq effect as a box
+    add_single_box(
+      top = r0,
+      bottom = tp_baseline,
+      box_colour = baseline_colour,
+      only_scenarios = first_scenario,
+      text_main = paste0(
+        "baseline\nPHSM\n&\n",
+        ttiq_plot,
+        "\nTTIQ"
+      )
+    ) %>%
+    add_single_box(
+      top = tp_baseline,
+      bottom = tp_coverage_0.7,
+      box_colour = vaccine_colours[1],
+      text_main = "70%\nvaccination\ncoverage",
+      only_scenarios = first_scenario
+    ) %>%
+    add_stacked_box(
+      top = tp_coverage_0.7,
+      bottom = tp_coverage_0.8,
+      reference = tp_baseline_vacc,
+      text_main = "80%",
+      only_scenarios = first_scenario,
+      box_colour = vaccine_colours[2]
+    ) %>%
+    add_stacked_box(
+      top = tp_coverage_0.8,
+      bottom = tp_coverage_0.9,
+      reference = tp_baseline_vacc,
+      text_main = "90%",
+      only_scenarios = first_scenario,
+      box_colour = vaccine_colours[3]
+    ) %>%
+    add_stacked_box(
+      top = tp_coverage_0.9,
+      bottom = tp_coverage_1,
+      reference = tp_baseline_vacc,
+      text_main = "100%",
+      only_scenarios = first_scenario,
+      box_colour = vaccine_colours[4]
+    ) %>%
+    add_arrow(8) +
+    theme(
+      axis.text.x = element_text(
+        size = 10,
+        colour = grey(0.1)
+      )
     )
-  ) %>%
-  add_single_box(
-    top = tp_baseline,
-    bottom = tp_coverage_0.7,
-    box_colour = vaccine_colours[1],
-    text_main = "70%\nvaccination\ncoverage",
-    only_scenarios = first_scenario
-  ) %>%
-  add_stacked_box(
-    top = tp_coverage_0.7,
-    bottom = tp_coverage_0.8,
-    reference = tp_baseline_vacc,
-    text_main = "80%",
-    only_scenarios = first_scenario,
-    box_colour = vaccine_colours[2]
-  ) %>%
-  add_stacked_box(
-    top = tp_coverage_0.8,
-    bottom = tp_coverage_0.9,
-    reference = tp_baseline_vacc,
-    text_main = "90%",
-    only_scenarios = first_scenario,
-    box_colour = vaccine_colours[3]
-  ) %>%
-  add_stacked_box(
-    top = tp_coverage_0.9,
-    bottom = tp_coverage_1,
-    reference = tp_baseline_vacc,
-    text_main = "100%",
-    only_scenarios = first_scenario,
-    box_colour = vaccine_colours[4]
-  ) %>%
-  add_arrow(8) +
-  theme(
-    axis.text.x = element_text(
-      size = 10,
-      colour = grey(0.1)
-    )
+  
+  ggsave(
+    sprintf("outputs/aboriginal_tp_figure_%s.png", ttiq_plot),
+    bg = "white",
+    width = 8,
+    height = 6
   )
-
-ggsave("outputs/aboriginal_tp_figure.png",
-       bg = "white",
-       width = 8,
-       height = 6)
+  
+}

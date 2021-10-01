@@ -200,13 +200,13 @@ tp_reduction %>%
       geometry = geometry,
       fill = tp
     ),
-    colour = NA
+    colour = "white"
   ) +
   scale_fill_viridis_c(option = "B") +
   labs(
     title = "Baseline transmission potential",
     subtitle = "TP adjusted for household size and age structure in each local government area",
-    fill = "TP"
+    fill = "Baseline\nTransmission\nPotential"
   ) +
   theme_minimal()
 

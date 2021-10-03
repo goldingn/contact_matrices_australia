@@ -1,40 +1,31 @@
-# calibrate wetting weights against 10y case age distribution data from VIC
+# calibrate wetting weights against case age distribution data from england over
+# time, with Delta, post-reopening and pre-vaccination of 12-15 year olds
+england_infections <- get_england_infections()
+england_vaccination_coverage <- get_england_vaccination_coverage()
 
-# load VIC case age data in 10y age bins
-cases <- read_csv(
-  "data/vic_cases_by_age_group_20211002.csv",
-  col_types = cols(
-    diagnosis_date = col_date(format = ""),
-    agegroup = col_character()
-  )
-) %>%
-  rename(
-    age_group = agegroup
-  ) %>%
-  filter(
-    diagnosis_date > as.Date("2021-09-01"),
-    age_group != "Age unknown"
-  ) %>%
-  mutate(
-    age_group = case_when(
-      age_group %in% c("80-89", "90+") ~ "80+",
-      age_group == "10-19_" ~ "10-19",
-      TRUE ~ age_group
+# model england infection age distribution for ages 2-85
+england_data <- england_infections %>%
+  group_by(age) %>%
+  summarise(
+    across(
+      infections,
+      mean
     )
   ) %>%
-  group_by(age_group) %>%
-  summarise(
-    count = n()
-  )
+  left_join(
+    england_vaccination_coverage,
+    by = "age")
 
-# define age limits
-age_breaks <- c(seq(0, 80, by = 10), Inf)
+# build England-specific contact matrices
 
 # fit contact model to polymod
 model <- fit_setting_contacts(
   get_polymod_setting_data(),
   population = get_polymod_population()
 )
+
+# define age limits (integer years from 2-85, as per prevalence data)
+age_breaks <- seq(2, 86, by = 1)
 
 age_lookup <- get_age_group_lookup(
   age_breaks
@@ -95,9 +86,9 @@ setting_transmission <- read_csv(
     ),
     .groups = "drop"
   ) %>%
-  rename(
-    case_age = case_age,
-    contact_age = contact_age
+  filter(
+    !is.na(case_age),
+    !is.na(contact_age)
   )
 
 # convert to a list of matrices
@@ -122,23 +113,45 @@ setting_transmission_matrices <- setting_transmission %>%
   as.list() %>%
   lapply(pluck, 1)
 
-# return a list of setting-specific contact matrices for NSW states, accounting
-# for population age distributions and household sizes
+# number of households of each size in UK in 2020 from:
+# https://www.ons.gov.uk/peoplepopulationandcommunity/birthsdeathsandmarriages/families/datasets/familiesandhouseholdsfamiliesandhouseholds
+# convert to population-average (not household average) household size, assuming
+# households of 7+ all have size 7
+uk_household_sizes <- tribble(
+  ~household_size, ~n_households,
+  1, 7898,
+  2, 9675,
+  3, 4337,
+  4, 4095,
+  5, 1246,
+  6, 377,
+  7, 163
+) %>%
+  mutate(
+    n_people = household_size * n_households,
+    fraction = n_people / sum(n_people)
+  ) %>%
+  summarise(
+    mean_household_size = sum(household_size * fraction)
+  )
+
+england_population <- get_england_population() %>%
+  rename(
+    lower.age.limit = age
+  )
+
+# return a list of setting-specific contact matrices for England states,
+# accounting for population age distributions and household sizes
 setting_contact_matrices <- tibble(
-  state = "VIC"
+  household_size = uk_household_sizes$mean_household_size,
+  population = list(england_population)
 ) %>%
   rowwise() %>%
   mutate(
-    household_size = get_mean_household_size(
-      state = state
-    ),
-    population = list(
-      abs_age_state(state)
-    ),
     setting_matrices = list(
       predict_setting_contacts(
         contact_model = model,
-        population = abs_age_state(state),
+        population = population,
         age_breaks = age_breaks
       )
     )
@@ -194,11 +207,11 @@ initial <- stable_age / sum(stable_age)
 
 solutions <- greta.dynamics::iterate_matrix(ngm, initial_state = initial)
 stable_age_distribution <- solutions$stable_distribution
-
-counts <- as_data(t(cases$count))
+infections <- round(england_data$infections)
+counts <- as_data(t(infections))
 # define the likelihood
 distribution(counts) <- multinomial(
-  size = sum(cases$count),
+  size = sum(infections),
   prob = t(stable_age_distribution)
 )
 
@@ -214,7 +227,4 @@ stable_sims <- calculate(stable_age_distribution, values = draws, nsim = 1000)[[
 stable_sims_mean <- colMeans(stable_sims[, , 1])
 stable_sims_mean <- stable_sims_mean / sum(stable_sims_mean)
 barplot(stable_sims_mean)
-barplot(cases$count)
-
-# after accounting for vaccination, try modelling the weights as a function of
-# google metrics and school/work closures?
+barplot(infections)

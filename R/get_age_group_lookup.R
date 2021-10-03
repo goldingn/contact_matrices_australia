@@ -10,7 +10,8 @@
 #' @export
 get_age_group_lookup <- function(
   age_breaks,
-  age_breaks_1y = 0:100
+  age_breaks_1y = 0:100,
+  label_includes_upper = FALSE
 ) {
   
   n_breaks <- length(age_breaks)
@@ -26,7 +27,9 @@ get_age_group_lookup <- function(
       age >= lower & age < upper
     ) %>%
     mutate(
-      upper = paste0("-", upper - 1),
+      label_includes_upper = label_includes_upper,
+      upper = ifelse(label_includes_upper, upper, upper - 1),
+      upper = paste0("-", upper),
       upper = if_else(upper == "-Inf", "+", upper),
       age_group = paste0(lower, upper)
     ) %>%

@@ -1,6 +1,40 @@
 # calibrate setting weights against case age distribution data from england over
 # time, with Delta, post-reopening and pre-vaccination of 12-15 year olds
-england_infections <- get_england_infections()
+
+# aggregate to broad ONS categories to match data, since the smoothing may hide
+# kinks, so fitting to integer ages is not reliable
+ons_age_group_lookup <- tibble(
+  age = 2:85
+) %>%
+  mutate(
+    age_group = case_when(
+      age < 12 ~ "2-11",
+      age < 16 ~ "12-15",
+      age < 25 ~ "16-24",
+      age < 35 ~ "25-34",
+      age < 50 ~ "35-49",
+      age < 70 ~ "50-69",
+      TRUE ~ "70-85"
+    ),
+    age_group = factor(
+      age_group, 
+      levels = unique(age_group)
+    )
+  )
+
+# get infections
+england_infections <- get_england_infections() %>%
+  left_join(
+    ons_age_group_lookup,
+    by = "age"
+  ) %>%
+  group_by(age_group) %>%
+  summarise(
+    across(
+      infections,
+      sum
+    )
+  )
 
 # compute vaccine efficacy against onward infection and onward transmission,
 # assuming mean of pfizer and AZ assumptions from national plan phase 1
@@ -28,31 +62,25 @@ england_vaccination_effect <- get_england_vaccination_coverage() %>%
     age,
     infection_multiplier,
     onward_transmission_multiplier
+  ) %>%
+  filter(
+    age >= 2,
+    age <= 85
   )
   
-# get england infection age distribution and vaccination effects for ages 2-85
-england_data <- england_infections %>%
-  group_by(age) %>%
-  summarise(
-    across(
-      infections,
-      mean
-    )
-  ) %>%
-  left_join(
-    england_vaccination_effect,
-    by = "age"
-  )
-
 # build England-specific contact matrices
 
-# fit contact model to polymod
+# fit contact model to polymod, only for the UK
+
+# polymod_school$participants <- polymod_school$participants %>%
+#   filter(participant_nationality == "UK")
+
 model <- fit_setting_contacts(
-  get_polymod_setting_data(),
-  population = get_polymod_population()
+  get_polymod_setting_data(countries = "United Kingdom"),
+  population = get_polymod_population(countries = "United Kingdom")
 )
 
-# define age limits (integer years from 2-85, as per prevalence data)
+# define model age limits (integer years from 2-85, as per prevalence data extents)
 age_breaks <- seq(2, 86, by = 1)
 
 age_lookup <- get_age_group_lookup(
@@ -204,13 +232,72 @@ setting_contact_matrices <- tibble(
 
 # get a matrix of the effects of vaccines
 vaccine_effect <- outer(
-  england_data$infection_multiplier,
-  england_data$onward_transmission_multiplier,
+  england_vaccination_effect$infection_multiplier,
+  england_vaccination_effect$onward_transmission_multiplier,
   FUN = "*"
 )
 
+# compute marginals of household transmission paramters and recombine, as a way
+# of factoring out household-specific mixing effects (like higher-risk
+# inter-couple, parent-child, grandparent-child contact). Want to weight over
+# the most commonly observed age pairs (to downwieight areas computed from
+# little data), but without the age data, we have toi assume this is
+# proportional to the contact rate estimates
 
+home_contacts <- conmat::matrix_to_predictions(setting_contact_matrices$home)
+household_transmissions <- conmat::matrix_to_predictions(setting_transmission_matrices$household)
+home_contact_transmissions <- home_contacts %>%
+  mutate(
+    probability = household_transmissions$contacts
+  )
 
+relative_susceptibility <- home_contact_transmissions %>%
+  group_by(age_group_to) %>%
+  summarise(
+    probability = weighted.mean(probability, contacts),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    probability = probability / max(probability)
+  )
+  
+
+relative_infectiousness <- home_contact_transmissions %>%
+  group_by(age_group_from) %>%
+  summarise(
+    probability = weighted.mean(probability, contacts),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    probability = probability / max(probability)
+  )
+ 
+ 
+# relative_susceptibility %>%
+#   ggplot(
+#     aes(
+#       x = age_group_to,
+#       y = probability
+#     )
+#   ) +
+#   geom_col()
+# relative_infectiousness %>%
+#   ggplot(
+#     aes(
+#       x = age_group_from,
+#       y = probability
+#     )
+#   ) +
+#   geom_col()
+
+relative_transmission_matrix <- outer(
+  relative_infectiousness$probability,
+  relative_susceptibility$probability,
+  FUN = "*"
+)
+
+# plot_matrix(setting_transmission_matrices$household)
+# plot_matrix(relative_transmission_matrix)
 
 library(greta.dynamics)
 
@@ -218,12 +305,16 @@ library(greta.dynamics)
 # make them sum to 1, since the stable age distribution is invariant to the  
 weights <- simplex_variable(4)
 
+# vaccine_multiplier <- normal(1, 1, truncation = c(0, Inf))
+vaccine_multiplier <- 1
+
 setting_weights <- list(
-  home = weights[1],
-  school = weights[2],
-  work = weights[3],
-  other = weights[4]
+  weights[1],
+  weights[2],
+  weights[3],
+  weights[4]
 )
+names(setting_weights) <- names(setting_contact_matrices)
 
 setting_weighted_contacts <- mapply(
   `*`,
@@ -235,8 +326,21 @@ setting_weighted_contacts <- mapply(
 # get next generation matrix, pre-vaccination
 ngm_pre_vacc <- Reduce("+", setting_weighted_contacts) * setting_transmission_matrices$household
 
-# apply vaccination effects
-ngm <- ngm_pre_vacc * vaccine_effect
+# ngm_pre_vacc <- setting_weighted_contacts$home * relative_transmission_matrix +
+#   setting_weighted_contacts$school * relative_transmission_matrix +
+#   setting_weighted_contacts$work * relative_transmission_matrix +
+#   setting_weighted_contacts$other * relative_transmission_matrix
+
+# ngm_pre_vacc <- setting_weighted_contacts$home * setting_transmission_matrices$household +
+#   setting_weighted_contacts$school * setting_transmission_matrices$work_education +
+#   setting_weighted_contacts$work * setting_transmission_matrices$work_education +
+#   setting_weighted_contacts$other * setting_transmission_matrices$events_activities
+
+
+
+# apply vaccination effects, with parameter for reduced effectiveness of
+# vaccines relative to assumed
+ngm <- ngm_pre_vacc * vaccine_effect ^ vaccine_multiplier
 
 # use better initial age distribution for faster sampling
 ngm_unscaled  <- Reduce("+", setting_contact_matrices) * setting_transmission_matrices$household * vaccine_effect
@@ -245,41 +349,94 @@ initial <- stable_age / sum(stable_age)
 
 solutions <- greta.dynamics::iterate_matrix(ngm, initial_state = initial)
 stable_age_distribution <- solutions$stable_distribution
-infections <- round(england_data$infections)
+
+# aggregate to match age groups
+stable_age_distribution_grouped_unscaled <- tapply(
+  X = stable_age_distribution,
+  INDEX = as.numeric(ons_age_group_lookup$age_group),
+  FUN = "sum"
+)
+stable_age_distribution_grouped <- stable_age_distribution_grouped_unscaled / sum(stable_age_distribution_grouped_unscaled)
+
+infections <- round(england_infections$infections * 150000 / sum(england_infections$infections))
 
 counts <- as_data(t(infections))
 
 # define the likelihood
 distribution(counts) <- multinomial(
   size = sum(infections),
-  prob = t(stable_age_distribution)
+  prob = t(stable_age_distribution_grouped)
 )
 
 # fit the model by HMC
-m <- model(weights)
+m <- model(weights) # , vaccine_multiplier)
 draws <- mcmc(m)
 
 # check sampling
 coda::gelman.diag(draws, autoburnin = FALSE, multivariate = FALSE)
 bayesplot::mcmc_trace(draws)
+
 ages <- colnames(setting_contact_matrices$home) %>%
   str_replace(",", "-") %>%
   parse_number()
+
 # plot posterior mean distribution and infections
-stable_sims <- calculate(stable_age_distribution, values = draws, nsim = 1000)[[1]]
+stable_sims <- calculate(stable_age_distribution_grouped,
+                         values = draws,
+                         nsim = 1000)[[1]]
 stable_sims_mean <- colMeans(stable_sims[, , 1])
 stable_sims_mean <- stable_sims_mean / sum(stable_sims_mean)
 par(mfrow = c(2, 1), mar = c(2, 2, 2, 1) + 0.1)
-bp <- barplot(stable_sims_mean,
-              main = "England modelled",
-              xlab = "case ages",
-              names.arg = ages)
-abline(v = bp[ages == 12], lty = 2)
+barplot(stable_sims_mean,
+        main = "England modelled",
+        xlab = "case ages",
+        names.arg = england_infections$age_group)
 barplot(infections,
         main = "England observed",
         xlab = "case ages",
-        names.arg = ages)
+        names.arg = england_infections$age_group)
 abline(v = bp[ages == 12], lty = 2)
 
 # also plot prediction with posterior estimate of weights
+
+
+# check these estimates against their own
+ons_prevalence_estimates <- tribble(
+  ~age_group, ~prevalence_percent,
+  "2-11", 2.6,
+  "12-15", 4.6,
+  "16-24", 1.1,
+  "25-34", 0.6,
+  "35-49", 0.8,
+  "50-69", 0.7,
+  "70-85", 0.5
+)
+
+ons_raw <- ons_age_group_lookup %>%
+  left_join(
+    get_england_population(),
+    by = "age"
+  ) %>%
+  group_by(
+    age_group
+  ) %>%
+  summarise(
+    across(
+      population,
+      sum
+    )
+  ) %>%
+  left_join(
+    ons_prevalence_estimates,
+    by = "age_group"
+  ) %>%
+  mutate(
+    infections = population * prevalence_percent / 100,
+    relative_infections = infections / sum(infections)
+  ) 
+
+barplot(ons_raw$relative_infections,
+        main = "England observed",
+        names.arg = ons_raw$age_group)
+  
 

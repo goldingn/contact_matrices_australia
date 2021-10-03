@@ -1,9 +1,36 @@
-# calibrate wetting weights against case age distribution data from england over
+# calibrate setting weights against case age distribution data from england over
 # time, with Delta, post-reopening and pre-vaccination of 12-15 year olds
 england_infections <- get_england_infections()
-england_vaccination_coverage <- get_england_vaccination_coverage()
 
-# model england infection age distribution for ages 2-85
+# compute vaccine efficacy against onward infection and onward transmission,
+# assuming mean of pfizer and AZ assumptions from national plan phase 1
+# modelling
+efficacy <- list(
+  infection = list(
+    dose_1_only = 0.25,
+    dose_2 = 0.7
+  ),
+  onward_transmission = list(
+    dose_1_only = 0.47,
+    dose_2 = 0.65
+  )
+)
+
+england_vaccination_effect <- get_england_vaccination_coverage() %>%
+  mutate(
+    dose_1_only = dose_1 - dose_2,
+    infection_multiplier = 1 - (dose_1_only * efficacy$infection$dose_1_only +
+      dose_2 * efficacy$infection$dose_2),
+    onward_transmission_multiplier = 1 - (dose_1_only * efficacy$onward_transmission$dose_1_only +
+      dose_2 * efficacy$onward_transmission$dose_2)
+  ) %>%
+  select(
+    age,
+    infection_multiplier,
+    onward_transmission_multiplier
+  )
+  
+# get england infection age distribution and vaccination effects for ages 2-85
 england_data <- england_infections %>%
   group_by(age) %>%
   summarise(
@@ -13,8 +40,9 @@ england_data <- england_infections %>%
     )
   ) %>%
   left_join(
-    england_vaccination_coverage,
-    by = "age")
+    england_vaccination_effect,
+    by = "age"
+  )
 
 # build England-specific contact matrices
 
@@ -174,9 +202,15 @@ setting_contact_matrices <- tibble(
   pull(setting_matrices) %>%
   `[`(1:4)
 
-# need to load age-specific vaccination coverages too, and do multiple
-# observations with different coverages to get more age-specific information
-stop("incorporate vaccination")
+# get a matrix of the effects of vaccines
+vaccine_effect <- outer(
+  england_data$infection_multiplier,
+  england_data$onward_transmission_multiplier,
+  FUN = "*"
+)
+
+
+
 
 library(greta.dynamics)
 
@@ -198,17 +232,23 @@ setting_weighted_contacts <- mapply(
   SIMPLIFY = FALSE
 )
 
-ngm <- Reduce("+", setting_weighted_contacts) * setting_transmission_matrices$household
+# get next generation matrix, pre-vaccination
+ngm_pre_vacc <- Reduce("+", setting_weighted_contacts) * setting_transmission_matrices$household
+
+# apply vaccination effects
+ngm <- ngm_pre_vacc * vaccine_effect
 
 # use better initial age distribution for faster sampling
-ngm_unscaled  <- Reduce("+", setting_contact_matrices) * setting_transmission_matrices$household
+ngm_unscaled  <- Reduce("+", setting_contact_matrices) * setting_transmission_matrices$household * vaccine_effect
 stable_age <- Re(eigen(ngm_unscaled)$vectors[, 1])
 initial <- stable_age / sum(stable_age)
 
 solutions <- greta.dynamics::iterate_matrix(ngm, initial_state = initial)
 stable_age_distribution <- solutions$stable_distribution
 infections <- round(england_data$infections)
+
 counts <- as_data(t(infections))
+
 # define the likelihood
 distribution(counts) <- multinomial(
   size = sum(infections),
@@ -222,9 +262,24 @@ draws <- mcmc(m)
 # check sampling
 coda::gelman.diag(draws, autoburnin = FALSE, multivariate = FALSE)
 bayesplot::mcmc_trace(draws)
-
+ages <- colnames(setting_contact_matrices$home) %>%
+  str_replace(",", "-") %>%
+  parse_number()
+# plot posterior mean distribution and infections
 stable_sims <- calculate(stable_age_distribution, values = draws, nsim = 1000)[[1]]
 stable_sims_mean <- colMeans(stable_sims[, , 1])
 stable_sims_mean <- stable_sims_mean / sum(stable_sims_mean)
-barplot(stable_sims_mean)
-barplot(infections)
+par(mfrow = c(2, 1), mar = c(2, 2, 2, 1) + 0.1)
+bp <- barplot(stable_sims_mean,
+              main = "England modelled",
+              xlab = "case ages",
+              names.arg = ages)
+abline(v = bp[ages == 12], lty = 2)
+barplot(infections,
+        main = "England observed",
+        xlab = "case ages",
+        names.arg = ages)
+abline(v = bp[ages == 12], lty = 2)
+
+# also plot prediction with posterior estimate of weights
+

@@ -25,6 +25,25 @@ efficacy <- list(
     dose_2 = 0.65
   )
 )
+# 
+# # convert from multiple odds ratios to mean *reduction* in risk
+# from_OR <- function(..., p = 0.49) {
+#   ORs <- c(...)
+#   RRs <- ORs / (1 - p + (p * ORs))
+#   mean(1 - RRs)
+# }
+# 
+# # with eyre estimates, converting from odds ratios with overall 49% positivity in the unvaccinated
+# efficacy <- list(
+#   infection = list(
+#     dose_1_only = from_OR(0.54, 0.58),
+#     dose_2 = from_OR(0.28, 0.1)
+#   ),
+#   onward_transmission = list(
+#     dose_1_only = from_OR(0.98, 0.87),
+#     dose_2 = from_OR(0.65, 0.35)
+#   )
+# )
 
 england_vaccination_effect <- get_england_vaccination_coverage() %>%
   mutate(
@@ -305,25 +324,6 @@ ons_index <- get_ons_age_group_lookup() %>%
     n_index = max(index, na.rm = TRUE),
     index = replace_na(index, n_index[1] + 1)
   )
-  
-  # age_lookup %>%
-  # rename(
-  #   age_group_model = age_group
-  # ) %>%
-  # # colnames(setting_transmission_matrices$household) %>%
-  # left_join(
-  #   get_ons_age_group_lookup(),
-  #   by = "age"
-  # ) %>%
-  # filter(
-  #   !is.na(age_group)
-  # ) %>%
-  # select(
-  #   age_group_model,
-  #   age_group
-  # ) %>%
-  # distinct()
-  
 
 # aggregate to match age groups
 stable_age_distribution_grouped_unscaled <- tapply(
@@ -376,7 +376,3 @@ barplot(infections,
         xlab = "case ages",
         ylab = "number of infections",
         names.arg = england_infections$age_group)
-
-# switch to modelling with all years, not just 2-85
-# read in ons data
-

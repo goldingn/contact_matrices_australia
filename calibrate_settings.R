@@ -98,8 +98,8 @@ england_vaccination_effect <- get_england_vaccination_coverage() %>%
 #   filter(participant_nationality == "UK")
 
 model <- fit_setting_contacts(
-  get_polymod_setting_data(countries = "United Kingdom"),
-  population = get_polymod_population(countries = "United Kingdom")
+  get_polymod_setting_data(),
+  population = get_polymod_population()
 )
 
 # define model age limits (integer years from 2-85, as per prevalence data extents)
@@ -327,15 +327,13 @@ library(greta.dynamics)
 # make them sum to 1, since the stable age distribution is invariant to the  
 weights <- simplex_variable(4)
 
-# vaccine_multiplier <- normal(1, 1, truncation = c(0, Inf))
-vaccine_multiplier <- 1
-
 setting_weights <- list(
   weights[1],
   weights[2],
   weights[3],
   weights[4]
 )
+
 names(setting_weights) <- names(setting_contact_matrices)
 
 setting_weighted_contacts <- mapply(
@@ -345,24 +343,15 @@ setting_weighted_contacts <- mapply(
   SIMPLIFY = FALSE
 )
 
-# get next generation matrix, pre-vaccination
-ngm_pre_vacc <- Reduce("+", setting_weighted_contacts) * setting_transmission_matrices$household
-
-# ngm_pre_vacc <- setting_weighted_contacts$home * relative_transmission_matrix +
-#   setting_weighted_contacts$school * relative_transmission_matrix +
-#   setting_weighted_contacts$work * relative_transmission_matrix +
-#   setting_weighted_contacts$other * relative_transmission_matrix
-
-# ngm_pre_vacc <- setting_weighted_contacts$home * setting_transmission_matrices$household +
-#   setting_weighted_contacts$school * setting_transmission_matrices$work_education +
-#   setting_weighted_contacts$work * setting_transmission_matrices$work_education +
-#   setting_weighted_contacts$other * setting_transmission_matrices$events_activities
-
-
+# get next generation matrix, pre-vaccination, by weighting these matrices
+ngm_pre_vacc <- setting_weighted_contacts$home * setting_transmission_matrices$household +
+  setting_weighted_contacts$school * setting_transmission_matrices$work_education +
+  setting_weighted_contacts$work * setting_transmission_matrices$work_education +
+  setting_weighted_contacts$other * setting_transmission_matrices$events_activities
 
 # apply vaccination effects, with parameter for reduced effectiveness of
 # vaccines relative to assumed
-ngm <- ngm_pre_vacc * vaccine_effect ^ vaccine_multiplier
+ngm <- ngm_pre_vacc * vaccine_effect
 
 # use better initial age distribution for faster sampling
 ngm_unscaled  <- Reduce("+", setting_contact_matrices) * setting_transmission_matrices$household * vaccine_effect
@@ -398,29 +387,29 @@ draws <- mcmc(m)
 coda::gelman.diag(draws, autoburnin = FALSE, multivariate = FALSE)
 bayesplot::mcmc_trace(draws)
 
-ages <- colnames(setting_contact_matrices$home) %>%
-  str_replace(",", "-") %>%
-  parse_number()
+# get posterior mean of parameters (ensuring it sums to 1)
+weights_posterior_mean <- summary(draws)$statistics[, "Mean"]
+weights_posterior_mean <- weights_posterior_mean / sum(weights_posterior_mean)
+names(weights_posterior_mean) <- names(setting_weights)
 
-# plot posterior mean distribution and infections
-stable_sims <- calculate(stable_age_distribution_grouped,
-                         values = draws,
-                         nsim = 1000)[[1]]
-stable_sims_mean <- colMeans(stable_sims[, , 1])
-stable_sims_mean <- stable_sims_mean / sum(stable_sims_mean)
-par(mfrow = c(2, 1), mar = c(2, 2, 2, 1) + 0.1)
-barplot(stable_sims_mean,
+# and compute stable age distribution based on the posterior mean
+stable_age_post_grouped <- calculate(
+  stable_age_distribution_grouped,
+  values = list(weights = weights_posterior_mean)
+)[[1]][, 1]
+
+# compare outputs
+par(mfrow = c(2, 1), mar = c(3, 4, 2, 1))
+barplot(stable_age_post_grouped,
         main = "England modelled",
         xlab = "case ages",
+        ylab = "fraction of infections",
         names.arg = england_infections$age_group)
 barplot(infections,
         main = "England observed",
         xlab = "case ages",
+        ylab = "number of infections",
         names.arg = england_infections$age_group)
-abline(v = bp[ages == 12], lty = 2)
-
-# also plot prediction with posterior estimate of weights
 
 # switch to modelling with all years, not just 2-85
-# switch back to all-polymod contact model
 # read in ons data

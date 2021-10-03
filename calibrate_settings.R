@@ -22,19 +22,41 @@ ons_age_group_lookup <- tibble(
     )
   )
 
-# get infections
-england_infections <- get_england_infections() %>%
+# read ONS prevalence estiamtes
+ons_prevalence_estimates <- tribble(
+  ~age_group, ~prevalence_percent,
+  "2-11", 2.6,
+  "12-15", 4.6,
+  "16-24", 1.1,
+  "25-34", 0.6,
+  "35-49", 0.8,
+  "50-69", 0.7,
+  "70-85", 0.5
+)
+
+# convert to infections
+england_infections <- ons_age_group_lookup %>%
   left_join(
-    ons_age_group_lookup,
+    get_england_population(),
     by = "age"
   ) %>%
-  group_by(age_group) %>%
+  group_by(
+    age_group
+  ) %>%
   summarise(
     across(
-      infections,
+      population,
       sum
     )
-  )
+  ) %>%
+  left_join(
+    ons_prevalence_estimates,
+    by = "age_group"
+  ) %>%
+  mutate(
+    infections = population * prevalence_percent / 100,
+    relative_infections = infections / sum(infections)
+  ) 
 
 # compute vaccine efficacy against onward infection and onward transmission,
 # assuming mean of pfizer and AZ assumptions from national plan phase 1
@@ -399,44 +421,6 @@ abline(v = bp[ages == 12], lty = 2)
 
 # also plot prediction with posterior estimate of weights
 
-
-# check these estimates against their own
-ons_prevalence_estimates <- tribble(
-  ~age_group, ~prevalence_percent,
-  "2-11", 2.6,
-  "12-15", 4.6,
-  "16-24", 1.1,
-  "25-34", 0.6,
-  "35-49", 0.8,
-  "50-69", 0.7,
-  "70-85", 0.5
-)
-
-ons_raw <- ons_age_group_lookup %>%
-  left_join(
-    get_england_population(),
-    by = "age"
-  ) %>%
-  group_by(
-    age_group
-  ) %>%
-  summarise(
-    across(
-      population,
-      sum
-    )
-  ) %>%
-  left_join(
-    ons_prevalence_estimates,
-    by = "age_group"
-  ) %>%
-  mutate(
-    infections = population * prevalence_percent / 100,
-    relative_infections = infections / sum(infections)
-  ) 
-
-barplot(ons_raw$relative_infections,
-        main = "England observed",
-        names.arg = ons_raw$age_group)
-  
-
+# switch to modelling with all years, not just 2-85
+# switch back to all-polymod contact model
+# read in ons data

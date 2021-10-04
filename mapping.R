@@ -120,7 +120,7 @@ ggplot(
 vic_metro_lgas <- metro_lgas %>%
   filter(
     state_name_2016 == "Victoria",
-    pc_metro > 20
+    pc_metro > 5
   )
 
 ggplot(
@@ -164,7 +164,7 @@ ggplot(
 nsw_metro_lgas <- metro_lgas %>%
   filter(
     state_name_2016 == "New South Wales",
-    pc_metro > 20
+    pc_metro > 5
   )
 
 ggplot(
@@ -188,6 +188,9 @@ ggplot(
 ## plots of tp reduction
 dpi <- 200
 
+
+
+
 # Vic
 tp_reduction %>%
   right_join(
@@ -200,9 +203,22 @@ tp_reduction %>%
       geometry = geometry,
       fill = tp
     ),
-    colour = "white"
+    colour = "white",
+    size = 0.5
   ) +
-  scale_fill_viridis_c(option = "B") +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Melbourne"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 1
+  ) +
   labs(
     title = "Baseline transmission potential",
     subtitle = "TP adjusted for household size and age structure in each local government area",
@@ -230,13 +246,26 @@ tp_reduction %>%
       geometry = geometry,
       fill = tp_percent_reduction
     ),
-    colour = NA
+    colour = "white",
+    size = 0.5
   ) +
-  scale_fill_viridis_c(option = "B") +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Melbourne"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 1
+  ) +
   labs(
     title = "Percentage reduction in TP",
     subtitle = "Percentage reduction in transmission potential due to vaccination",
-    fill = "% reduction"
+    fill = "Transmission\nPotential\n% Reduction"
   ) +
   theme_minimal()
 
@@ -260,13 +289,26 @@ tp_reduction %>%
       geometry = geometry,
       fill = tp_vax
     ),
-    colour = NA
+    colour = "white",
+    size = 0.5
   ) +
-  scale_fill_viridis_c(option = "B") +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Melbourne"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 1
+  ) +
   labs(
     title = "Post vaccination TP",
     subtitle = "Transmission potential after 80% vaccination threshold",
-    fill = "TP"
+    fill = "Transmission\nPotential"
   ) +
   theme_minimal()
 
@@ -278,6 +320,90 @@ ggsave(
   scale = 1.2
 )
 
+
+wfh_lga_summary %>%
+  right_join(
+    vic_metro_lgas,
+    by = c("LGA_NAME_2018" = "lga_name_2018")
+  ) %>% 
+  ggplot() +
+  geom_sf(
+    aes(
+      geometry = geometry,
+      fill = wfh_mean
+    ),
+    colour = "white",
+    size = 0.5
+  ) +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Melbourne"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 0.7
+  ) +
+  labs(
+    title = "Index of ability to work from home",
+    subtitle = "Population-weighted mean index of ability to work from home",
+    fill = "Index\nscore"
+  ) +
+  theme_minimal()
+
+ggsave(
+  filename = "outputs/wfh_index_mean_vic.png",
+  dpi = dpi,
+  width = 1500 / dpi,
+  height = 1250 / dpi,
+  scale = 1.2
+)
+
+wfh_lga_summary %>%
+  right_join(
+    vic_metro_lgas,
+    by = c("LGA_NAME_2018" = "lga_name_2018")
+  ) %>% 
+  ggplot() +
+  geom_sf(
+    aes(
+      geometry = geometry,
+      fill = wfh_var
+    ),
+    colour = "white",
+    size = 0.5
+  ) +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Melbourne"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 0.7
+  ) +
+  labs(
+    title = "Variation in ability to work from home",
+    subtitle = "Variance of population-weighted index of ability to work from home",
+    fill = "Variance"
+  ) +
+  theme_minimal()
+
+ggsave(
+  filename = "outputs/wfh_index_var_vic.png",
+  dpi = dpi,
+  width = 1500 / dpi,
+  height = 1250 / dpi,
+  scale = 1.2
+)
 
 
 # NSW
@@ -293,9 +419,22 @@ tp_reduction %>%
       geometry = geometry,
       fill = tp
     ),
-    colour = NA
+    colour = "white",
+    size = 0.5
   ) +
-  scale_fill_viridis_c(option = "B") +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Sydney"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 0.7
+  ) +
   labs(
     title = "Baseline transmission potential",
     subtitle = "TP adjusted for household size and age structure in each local government area",
@@ -313,9 +452,18 @@ ggsave(
 
 
 tp_reduction %>%
+  # mutate(
+  #   state_name_2016 = case_when(
+  #     state == "NSW" ~ "New South Wales",
+  #     TRUE ~ state
+  #   )
+  # ) %>%
   right_join(
     nsw_metro_lgas,
-    by = c("lga" = "lga_name_2018")
+    by = c(
+      "lga" = "lga_name_2018"#,
+      #"state_name_2016"
+    )
   ) %>% 
   ggplot() +
   geom_sf(
@@ -323,13 +471,26 @@ tp_reduction %>%
       geometry = geometry,
       fill = tp_percent_reduction
     ),
-    colour = NA
+    colour = "white",
+    size = 0.5
   ) +
-  scale_fill_viridis_c(option = "B") +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Sydney"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 0.7
+  ) +
   labs(
     title = "Percentage reduction in TP",
     subtitle = "Percentage reduction in transmission potential due to vaccination",
-    fill = "% reduction"
+    fill = "Transmission\nPotential\n% Reduction"
   ) +
   theme_minimal()
 
@@ -353,13 +514,26 @@ tp_reduction %>%
       geometry = geometry,
       fill = tp_vax
     ),
-    colour = NA
+    colour = "white",
+    size = 0.5
   ) +
-  scale_fill_viridis_c(option = "B") +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Sydney"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 0.7
+  ) +
   labs(
     title = "Post vaccination TP",
     subtitle = "Transmission potential after 80% vaccination threshold",
-    fill = "TP"
+    fill = "Transmission\nPotential"
   ) +
   theme_minimal()
 
@@ -372,7 +546,101 @@ ggsave(
 )
 
 
+wfh_lga_summary %>%
+  right_join(
+    nsw_metro_lgas,
+    by = c("LGA_NAME_2018" = "lga_name_2018")
+  ) %>% 
+  ggplot() +
+  geom_sf(
+    aes(
+      geometry = geometry,
+      fill = wfh_mean
+    ),
+    colour = "white",
+    size = 0.5
+  ) +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Sydney"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 0.7
+  ) +
+  labs(
+    title = "Index of ability to work from home",
+    subtitle = "Population-weighted mean index of ability to work from home",
+    fill = "Index\nscore"
+  ) +
+  theme_minimal()
+
+ggsave(
+  filename = "outputs/wfh_index_mean_nsw.png",
+  dpi = dpi,
+  width = 1500 / dpi,
+  height = 1250 / dpi,
+  scale = 1.2
+)
+
+wfh_lga_summary %>%
+  right_join(
+    nsw_metro_lgas,
+    by = c("LGA_NAME_2018" = "lga_name_2018")
+  ) %>% 
+  ggplot() +
+  geom_sf(
+    aes(
+      geometry = geometry,
+      fill = wfh_var
+    ),
+    colour = "white",
+    size = 0.5
+  ) +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Sydney"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 0.7
+  ) +
+  labs(
+    title = "Variation in ability to work from home",
+    subtitle = "Variance of population-weighted index of ability to work from home",
+    fill = "Variance"
+  ) +
+  theme_minimal()
+
+ggsave(
+  filename = "outputs/wfh_index_var_nsw.png",
+  dpi = dpi,
+  width = 1500 / dpi,
+  height = 1250 / dpi,
+  scale = 1.2
+)
+
 # wfh index stuff - messy 
+wfh_lga <- readRDS("data/wfh_ability_joined.RDS")
+
+wfh_lga_summary <- wfh_lga  %>%
+  mutate(state = STE_NAME16) %>%
+  group_by(LGA_NAME_2018) %>%
+  mutate(LGA_pop = sum(population * ratio, na.rm = TRUE)) %>%
+  summarise(wfh_mean = Hmisc::wtd.mean(SA2_WFH, weights = population / LGA_pop * ratio, normwt = TRUE),
+            wfh_var = Hmisc::wtd.var(SA2_WFH, weights = population / LGA_pop * ratio, normwt = TRUE),
+            state = first(state))
+
 
 wfh_index %>%
   left_join(
@@ -405,6 +673,9 @@ anti_join(
   as_tibble %>%
   ggplot() +
   geom_sf(aes(geometry = geometry))
+
+
+## wfh
 
 
 
@@ -477,5 +748,3 @@ lga_wfh %>%
     )
   ) +
   scale_fill_viridis_c(option = "B", limits = c(0, 1))
-
-

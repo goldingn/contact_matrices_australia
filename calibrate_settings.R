@@ -376,3 +376,7 @@ barplot(infections,
         xlab = "case ages",
         ylab = "number of infections",
         names.arg = england_infections$age_group)
+
+
+setting_relative_weights <- weights_posterior_mean / weights_posterior_mean[1]
+dput(setting_relative_weights)

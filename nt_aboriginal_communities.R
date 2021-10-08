@@ -13,6 +13,8 @@
 
 # 5. plot these a la national plan figure
 
+source("packages.R")
+
 # get population distribution for health districts in NT
 age_limits_5y <- c(seq(0, 80, by = 5), Inf)
 
@@ -59,6 +61,9 @@ urban_household_correction_factor_5y <- aboriginal_household_correction_factor_5
   remote = FALSE
 )
   
+# 3. check school, work, and other contacts relative to contact
+# surveys/Australia
+
 # compare the number of social (non-household, non-work, non-school) contacts of
 # at least 1h from the CAMP-remote study (median 2) to a comparable subset
 # (women aged 17-37) of the polymod survey population
@@ -263,28 +268,50 @@ australia_ngm_unscaled <- get_australia_ngm_unscaled(
   age_breaks = age_limits_5y
 )
 
-optimal_ttiq_baseline <- 2.93
-partial_ttiq_baseline <- 3.62
+state_ngms_unscaled <- get_state_ngms_unscaled(
+  model,
+  age_breaks = age_limits_5y
+)
+
+transmission_matrices <- get_setting_transmission_matrices(
+  age_breaks = age_limits_5y
+)
+
+base_matrices <- c("home", "school", "work", "other")
+
+
+remote_nt_ngm_unscaled <- get_unscaled_ngm(
+  contact_matrices = remote_matrix_updated[base_matrices],
+  transmission_matrices = transmission_matrices
+)
+
+
+urban_nt_ngm_unscaled <- get_unscaled_ngm(
+  contact_matrices = urban_matrix_updated[base_matrices],
+  transmission_matrices = transmission_matrices
+)
+
 
 m <- find_m(
   R_target = partial_ttiq_baseline,
   transition_matrix = australia_ngm_unscaled
 )
+
 australia_ngm <- australia_ngm_unscaled * m
 
-state_ngms_unscaled <- get_state_ngms_unscaled(
-  model,
-  age_breaks = age_limits_5y
-)
 state_ngms <- lapply(state_ngms_unscaled, `*`, m)
 
 nt_ngm <- state_ngms$NT
 
-remote_nt_ngm_unscaled <- apply_age_contribution(remote_matrix_updated$all)
 remote_nt_ngm <- remote_nt_ngm_unscaled * m
 
-urban_nt_ngm_unscaled <- apply_age_contribution(urban_matrix_updated$all)
 urban_nt_ngm <- urban_nt_ngm_unscaled * m
+
+
+# 4. compute R0, TP, and vaccination effects in these communities
+optimal_ttiq_baseline <- 2.93
+partial_ttiq_baseline <- 3.62
+
 
 # apply vaccinqtion effect
 national_plan_vaccination <- readRDS("data/vacc_effect_by_age_scenario_19.RDS") %>%
@@ -302,8 +329,8 @@ national_plan_vaccination <- readRDS("data/vacc_effect_by_age_scenario_19.RDS") 
 combine_efficacy <- function(infection, transmission) {
   1 - ((1 - infection) * (1 - transmission)) 
 }
-efficacy_az_2_dose <- combine_efficacy(0.60, 0.65)
-efficacy_pf_2_dose <- combine_efficacy(0.79, 0.65)
+efficacy_az_2_dose <- combine_efficacy(0.67, 0.36)
+efficacy_pf_2_dose <- combine_efficacy(0.80, 0.65)
 
 australia_pop_fun <- abs_state_age %>%
   group_by(age_group) %>%
@@ -467,6 +494,10 @@ saveRDS(
 aboriginal_tp <- readRDS(
   file = "outputs/aboriginal_tp.RDS"
 )
+
+
+
+# 5. plot these a la national plan figure
 
 colours <- RColorBrewer::brewer.pal(3, "Set2")
 

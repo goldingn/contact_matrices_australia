@@ -302,7 +302,7 @@ setting_contact_matrices <- predict_setting_contacts(
 )[setting_order]
 
 # get a matrix of the effects of vaccination
-vaccine_effect <- outer(
+vaccine_effect_raw <- outer(
   england_vaccination_effect$infection_multiplier,
   england_vaccination_effect$onward_transmission_multiplier,
   FUN = "*"
@@ -361,8 +361,8 @@ scaling <- variable(lower = 0, dim = 4)
 # voluntary measures to reduce non-household transmission probabilities
 microdistancing <- variable(lower = 0, upper = 1)
 
-# # a correction factor for the effect of vaccination, since VE estimates are uncertain
-# vaccination_correction <- variable(lower = 0)
+# a correction factor for the effect of vaccination, since VE estimates are uncertain
+vaccine_effect_scaling <- normal(1, 0.05, truncation = c(0, Inf))
 
 # household_contacts * (1 - (1 - p) ^ scaling)
 # non_household_contacts * p * scaling
@@ -374,8 +374,6 @@ setting_scalings <- list(
   scaling[3],
   scaling[4]
 )
-
-
 names(setting_scalings) <- setting_order
 
 # choose baseline transmission matrices and ensure they are in the same order as the contact matrices
@@ -404,6 +402,8 @@ setting_ngms <- mapply(
   SIMPLIFY = FALSE
 )
 
+vaccine_effect <- vaccine_effect_raw * vaccine_effect_scaling
+
 # and create NGMs with of vaccination, mobility, and microdistancing
 setting_ngms_study_period <- list(
   home = setting_ngms$home * vaccine_effect,
@@ -419,7 +419,7 @@ ngm_pre_pandemic <- Reduce("+", setting_ngms)
 ngm <- Reduce("+", setting_ngms_study_period)
 
 # use better initial age distribution for faster sampling
-ngm_unscaled  <- Reduce("+", setting_contact_matrices) * setting_transmission_matrices$home * vaccine_effect
+ngm_unscaled  <- Reduce("+", setting_contact_matrices) * setting_transmission_matrices$home * vaccine_effect_raw
 stable_age <- Re(eigen(ngm_unscaled)$vectors[, 1])
 initial <- stable_age / sum(stable_age)
 
@@ -455,8 +455,8 @@ stable_age_distribution_grouped_unscaled <- tapply(
 
 stable_age_distribution_grouped <- stable_age_distribution_grouped_unscaled / sum(stable_age_distribution_grouped_unscaled)
 
-# relevel infections to prevent it form overwhelming the likelihood
-infections <- round(england_infections$infections * 500 / sum(england_infections$infections))
+# relevel infections to prevent it from overwhelming the likelihood
+infections <- round(england_infections$infections * 100 / sum(england_infections$infections))
 
 counts <- as_data(t(infections))
 
@@ -479,12 +479,12 @@ distribution(counts) <- multinomial(
 Rt_mean <- 1
 Rt_interval <- c(0.9, 1.1)
 Rt_sd <- mean(abs(Rt_mean - Rt_interval)) / qnorm(0.975, 0, 1)
-Rt_sd <- 0.025
+# Rt_sd <- 0.025
 distribution(Rt_mean) <- normal(rt, sd = Rt_sd, truncation = c(0, Inf))
 
-# use a crude, wide estimate for Delta R0
-R0_mean <- 6
-R0_sd <- 0.1
+# use a crude, wide estimate for Delta R0 (95% interval 5-8)
+R0_mean <- 7
+R0_sd <- 0.5
 # qnorm(c(0.025, 0.975), R0_mean, R0_sd)
 distribution(R0_mean) <- normal(r0, sd = R0_sd, truncation = c(0, Inf))
 
@@ -530,28 +530,38 @@ distribution(hSAR_mean) <- normal(hSAR_mean, hSAR_sd, truncation = c(0, 1))
 # assume 2%, as per https://doi.org/10.1016/s0140-6736(21)01908-5
 ss_index <- ons_index$age %in% 11:16
 ssSAR <- mean(setting_transmission_matrices$school[ss_index, ss_index] * setting_scalings$school) * microdistancing
-ssSAR_mean <- 0.02
+ssSAR_mean <- 0.01
 ssSAR_sd <- 0.005
-# 1% (2-3%)
+# reduce the ssSAR, since 2% is likely an overestimate or our contact definition
+# (compute on UK test & trace data, with an average of 2-3 contacts)
+
 # qnorm(c(0.025, 0.975), ssSAR_mean, ssSAR_sd)
 # fit the model by HMC
 distribution(ssSAR_mean) <- normal(ssSAR, ssSAR_sd, truncation = c(0, 1))
 
-m <- model(scaling, microdistancing)
+m <- model(scaling, microdistancing, vaccine_effect_scaling)
 draws <- mcmc(m)
 
 # check sampling
 coda::gelman.diag(draws, autoburnin = FALSE, multivariate = FALSE)
 bayesplot::mcmc_trace(draws)
 
-# get posterior mean of scaling parameter
+# get posterior means of parameters
+# scaling_posterior_mean <- calculate(
+#   setting_scaling,
+#   values = draws,
+#   nsim = 10000,
+# )[[1]][, 1] %>%
+#   colMeans()
 scaling_posterior_mean <- summary(draws)$statistics[1:4, "Mean"]
-microdistancing_posterior_mean <- summary(draws)$statistics[5, "Mean"]
 names(scaling_posterior_mean) <- names(setting_scalings)
+microdistancing_posterior_mean <- summary(draws)$statistics[5, "Mean"]
+vaccine_effect_scaling_posterior_mean <- summary(draws)$statistics[6, "Mean"]
 
 estimates <- list(
   scaling = scaling_posterior_mean,
-  microdistancing = microdistancing_posterior_mean
+  microdistancing = microdistancing_posterior_mean,
+  vaccine_effect_scaling = vaccine_effect_scaling_posterior_mean
 )
 
 # and compute stable age distribution based on the posterior mean
@@ -603,16 +613,19 @@ estimated_attack_rates <- calculate(
 ) %>%
   lapply(c)
 
-estimated_attack_rates
 estimated_calibration_stats
+estimated_attack_rates
 
-# add a parameter for overall vaccine efficacy on transmission being different
-# than the assumed parameters
 
-# switch to assuming pfizer efficacies to amp-up the vaccination effect
+# scaling for work and other seem crazy high, since we expect them to be lower than for home
+# so force them to be via parameterisation. school can be independent
+
+# try changing the 'other' matrix to be the marginal home matrix
 
 
 # output scalings and change conmat to use them
+
+# compare with infection age distribution in UK pre-Delta and pre-vaccination (pre-lockdown?)
 
 
 

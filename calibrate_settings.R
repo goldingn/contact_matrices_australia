@@ -11,7 +11,6 @@ age_lookup <- get_age_group_lookup(
 # set the order of the setting-specific matrices, to ensure they are always aligned
 setting_order <- c("home", "school", "work", "other")
 
-
 # get age-distribution of infections in England
 england_infections <- get_england_infections()
 
@@ -308,6 +307,26 @@ vaccine_effect_raw <- outer(
   FUN = "*"
 )
  
+# aggregate population over age breaks
+pop_vec <- england_population %>%
+  left_join(
+    age_lookup,
+    by = c(lower.age.limit = "age")
+  ) %>%
+  group_by(
+    age_group
+  ) %>%
+  summarise(
+    across(
+      population,
+      sum
+    ),
+    .groups = "drop"
+  ) %>%
+  pull(
+    population
+  )
+
 # # compute marginals of household transmission parameters and recombine, as a way
 # # of factoring out household-specific mixing effects (like higher-risk
 # # inter-couple, parent-child, grandparent-child contact). Want to weight over
@@ -351,32 +370,9 @@ vaccine_effect_raw <- outer(
 
 library(greta.dynamics)
 
-# compute scaling on reproduction in each setting to match the contact
-# definition implicit in contact/polymod. Scale household transmission
-# binomially (transmission aturates at number of contacts), and non-household
-# transmission linearly
-scaling <- variable(lower = 0, dim = 4)
 
-# a microdistancing effect to reduce non-household contact rates - reflecting
-# voluntary measures to reduce non-household transmission probabilities
-microdistancing <- variable(lower = 0, upper = 1)
-
-# a correction factor for the effect of vaccination, since VE estimates are uncertain
-vaccine_effect_scaling <- normal(1, 0.05, truncation = c(0, Inf))
-
-# household_contacts * (1 - (1 - p) ^ scaling)
-# non_household_contacts * p * scaling
-
-# set up the scalings with the same names as the matrices
-setting_scalings <- list(
-  scaling[1],
-  scaling[2],
-  scaling[3],
-  scaling[4]
-)
-names(setting_scalings) <- setting_order
-
-# choose baseline transmission matrices and ensure they are in the same order as the contact matrices
+# choose baseline transmission probability matrices and ensure they are in the
+# correct order
 setting_transmission_matrices <-
   list(
     home = transmission_matrices$household,
@@ -385,13 +381,60 @@ setting_transmission_matrices <-
     other = transmission_matrices$events_activities
   )[setting_order]
 
-# scale each of them
+# compute scaling on transmission probabilities in each setting to match the contact
+# definition implicit in conmat (polymod) estimates.
+
+# Scale household transmission binomially (transmission saturates at number of
+# contacts), and non-household transmission linearly
+
+# compute population mean work attack rate from unscaled
+work_mean_unscaled <- mean_attack_rate(
+  transmission_probability_matrix = setting_transmission_matrices$work,
+  contact_matrix = setting_contact_matrices$work,
+  population = pop_vec
+)
+
+other_mean_unscaled <- mean_attack_rate(
+  transmission_probability_matrix = setting_transmission_matrices$other,
+  contact_matrix = setting_contact_matrices$other,
+  population = pop_vec
+)
+
+# set transmission probabilities in work and other to belower than 0.2 (lower
+# bound on household transmission probability)? especially since contact
+# definition implies more contacts (so fewer transissions per contact)
+work_scaling_max <- 0.3 / work_mean_unscaled
+other_scaling_max <- 0.2 / other_mean_unscaled
+
+# all parameters
+parameters <- list(
+  
+  # scale home and school freely (they are informed by SAR estimates)
+  home_scaling = variable(lower = 0),
+  school_scaling = variable(lower = 0),
+  
+  # force woth and other to have SAR less than 20%
+  work_scaling = variable(lower = 0, upper = work_scaling_max),
+  other_scaling = variable(lower = 0, upper = other_scaling_max),
+  
+  # a microdistancing effect to reduce non-household contact rates - reflecting
+  # voluntary measures to reduce non-household transmission probabilities
+  microdistancing = variable(lower = 0, upper = 1),
+  
+  # a correction factor for the effect of vaccination, since VE estimates are
+  # uncertain
+  vaccine_effect_scaling = normal(1, 0.05, truncation = c(0, Inf))
+  
+)
+
+# scale each of the transmission probability matrices
+# home is scaled binimially as contacts saturate
 setting_transmission_matrices_scaled <- 
   list(
-    home = 1 - (1 - setting_transmission_matrices$home) ^ setting_scalings$home,
-    school = setting_transmission_matrices$school * setting_scalings$school,
-    work = setting_transmission_matrices$work * setting_scalings$work,
-    other = setting_transmission_matrices$other * setting_scalings$other
+    home = 1 - (1 - setting_transmission_matrices$home) ^ parameters$home_scaling,
+    school = setting_transmission_matrices$school * parameters$school_scaling,
+    work = setting_transmission_matrices$work * parameters$work_scaling,
+    other = setting_transmission_matrices$other * parameters$other_scaling
   )[setting_order]
 
 # create NGMs in the absence of vaccination, mobility., or microdistancing
@@ -402,14 +445,17 @@ setting_ngms <- mapply(
   SIMPLIFY = FALSE
 )
 
-vaccine_effect <- vaccine_effect_raw * vaccine_effect_scaling
+vaccine_effect <- vaccine_effect_raw * parameters$vaccine_effect_scaling
 
 # and create NGMs with of vaccination, mobility, and microdistancing
 setting_ngms_study_period <- list(
   home = setting_ngms$home * vaccine_effect,
-  school = setting_ngms$school * uk_mobility_effect * microdistancing * vaccine_effect,
-  work = setting_ngms$work * uk_mobility_effect * microdistancing * vaccine_effect,
-  other = setting_ngms$other * uk_mobility_effect * microdistancing * vaccine_effect
+  school = setting_ngms$school *
+    uk_mobility_effect * parameters$microdistancing * vaccine_effect,
+  work = setting_ngms$work *
+    uk_mobility_effect * parameters$microdistancing * vaccine_effect,
+  other = setting_ngms$other *
+    uk_mobility_effect * parameters$microdistancing * vaccine_effect
 )[setting_order]
 
 # get next generation matrix, pre-vaccination, by summing these matrices
@@ -456,7 +502,7 @@ stable_age_distribution_grouped_unscaled <- tapply(
 stable_age_distribution_grouped <- stable_age_distribution_grouped_unscaled / sum(stable_age_distribution_grouped_unscaled)
 
 # relevel infections to prevent it from overwhelming the likelihood
-infections <- round(england_infections$infections * 100 / sum(england_infections$infections))
+infections <- round(england_infections$infections * 500 / sum(england_infections$infections))
 
 counts <- as_data(t(infections))
 
@@ -488,58 +534,39 @@ R0_sd <- 0.5
 # qnorm(c(0.025, 0.975), R0_mean, R0_sd)
 distribution(R0_mean) <- normal(r0, sd = R0_sd, truncation = c(0, Inf))
 
-# compute the hSAR and define a lijkelihood for that
-hSAR_matrix <- 1 - (1 - setting_transmission_matrices$home) ^ setting_scalings$home
-pop_weights <- england_population %>%
-  mutate(
-    age_group = pmin(lower.age.limit, 80),
-  ) %>% 
-  group_by(
-    age_group
-  ) %>%
-  summarise(
-    across(
-      population,
-      sum
-    ),
-    .groups = "drop"
-  ) %>%
-  mutate(
-    weight = population / sum(population)
-  ) %>%
-  pull(
-    weight
-  )
-
-# weight age-age hSARs by the population age distribution (columns) and the
-# contact age distribution (rows) to compute average over contact events
-hSAR_weights <- sweep(
-  setting_contact_matrices$home,
-  2,
-  pop_weights / colSums(setting_contact_matrices$home),
-  FUN = "*"
+# compute the hSAR and define a likelihood for that
+hSAR <- mean_attack_rate(
+  transmission_probability_matrix = setting_transmission_matrices_scaled$home,
+  contact_matrix = setting_contact_matrices$home,
+  population = pop_vec
 )
-hSAR <- sum(hSAR_matrix * hSAR_weights)
 
 hSAR_interval <- c(0.2, 0.35)
 hSAR_mean <- mean(hSAR_interval)
 hSAR_sd <- mean(abs(hSAR_mean - hSAR_interval)) / qnorm(0.975, 0, 1)
-distribution(hSAR_mean) <- normal(hSAR_mean, hSAR_sd, truncation = c(0, 1))
+distribution(hSAR_mean) <- normal(hSAR, hSAR_sd, truncation = c(0, 1))
 
-# add a likelihood term for the recent SAR in secondary schools
-# assume 2%, as per https://doi.org/10.1016/s0140-6736(21)01908-5
+# add a likelihood term for the recent SAR in secondary schools UK estimate
+# gives 2%, as per https://doi.org/10.1016/s0140-6736(21)01908-5 so use lower,
+# since 2% is likely an overestimate for our contact definition of 9-10 contacts
+# rather than 2-3
 ss_index <- ons_index$age %in% 11:16
-ssSAR <- mean(setting_transmission_matrices$school[ss_index, ss_index] * setting_scalings$school) * microdistancing
+ssSAR <- mean(setting_transmission_matrices_scaled$school[ss_index, ss_index])
 ssSAR_mean <- 0.01
 ssSAR_sd <- 0.005
-# reduce the ssSAR, since 2% is likely an overestimate or our contact definition
-# (compute on UK test & trace data, with an average of 2-3 contacts)
-
-# qnorm(c(0.025, 0.975), ssSAR_mean, ssSAR_sd)
-# fit the model by HMC
+# qnorm(0.975, ssSAR_mean, ssSAR_sd)
 distribution(ssSAR_mean) <- normal(ssSAR, ssSAR_sd, truncation = c(0, 1))
 
-m <- model(scaling, microdistancing, vaccine_effect_scaling)
+# fit the model by HMC
+attach(parameters)
+m <- model(
+  home_scaling,
+  school_scaling,
+  work_scaling,
+  other_scaling,
+  microdistancing,
+  vaccine_effect_scaling
+)
 draws <- mcmc(m)
 
 # check sampling
@@ -547,22 +574,16 @@ coda::gelman.diag(draws, autoburnin = FALSE, multivariate = FALSE)
 bayesplot::mcmc_trace(draws)
 
 # get posterior means of parameters
-# scaling_posterior_mean <- calculate(
-#   setting_scaling,
-#   values = draws,
-#   nsim = 10000,
-# )[[1]][, 1] %>%
-#   colMeans()
-scaling_posterior_mean <- summary(draws)$statistics[1:4, "Mean"]
-names(scaling_posterior_mean) <- names(setting_scalings)
-microdistancing_posterior_mean <- summary(draws)$statistics[5, "Mean"]
-vaccine_effect_scaling_posterior_mean <- summary(draws)$statistics[6, "Mean"]
-
-estimates <- list(
-  scaling = scaling_posterior_mean,
-  microdistancing = microdistancing_posterior_mean,
-  vaccine_effect_scaling = vaccine_effect_scaling_posterior_mean
-)
+estimates <- do.call(
+  calculate,
+  c(parameters,
+    list(
+      values = draws,
+      nsim = 4e3
+    )
+  )
+) %>%
+  lapply(mean)
 
 # and compute stable age distribution based on the posterior mean
 stable_age_post_grouped <- calculate(
@@ -615,6 +636,7 @@ estimated_attack_rates <- calculate(
 
 estimated_calibration_stats
 estimated_attack_rates
+
 
 
 # scaling for work and other seem crazy high, since we expect them to be lower than for home

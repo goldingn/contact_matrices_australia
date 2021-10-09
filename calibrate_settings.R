@@ -370,55 +370,33 @@ relative_transmission_matrix <- outer(
 
 # choose baseline transmission probability matrices and ensure they are in the
 # correct order
-setting_transmission_matrices <-
-  list(
+setting_transmission_matrices <- list(
     home = transmission_matrices$household,
-    school = relative_transmission_matrix,
-    work = relative_transmission_matrix,
-    other = relative_transmission_matrix
+    school = transmission_matrices$work_education,
+    work = transmission_matrices$work_education,
+    other = transmission_matrices$events_activities
   )[setting_order]
 
 
 # start fitting the model
 library(greta.dynamics)
 
-# compute population mean work attack rate from unscaled
-work_mean_unscaled <- mean_attack_rate(
-  transmission_probability_matrix = setting_transmission_matrices$work,
-  contact_matrix = setting_contact_matrices$work,
-  population = pop_vec
-)
-
-other_mean_unscaled <- mean_attack_rate(
-  transmission_probability_matrix = setting_transmission_matrices$other,
-  contact_matrix = setting_contact_matrices$other,
-  population = pop_vec
-)
-
-# set transmission probabilities in work and other to belower than 0.2 (lower
-# bound on household transmission probability)? especially since contact
-# definition implies more contacts (so fewer transissions per contact)
-work_scaling_max <- 0.3 / work_mean_unscaled
-other_scaling_max <- 0.2 / other_mean_unscaled
-
 # all parameters
 parameters <- list(
   
-  # scale home and school freely (they are informed by SAR estimates)
+  # scaling parameters for transmission probabilities
   home_scaling = variable(lower = 0),
   school_scaling = variable(lower = 0),
-  
-  # force woth and other to have SAR less than 20%
-  work_scaling = variable(lower = 0, upper = work_scaling_max),
-  other_scaling = variable(lower = 0, upper = other_scaling_max),
+  work_scaling = variable(lower = 0),
+  other_scaling = variable(lower = 0),
   
   # a microdistancing effect to reduce non-household contact rates - reflecting
   # voluntary measures to reduce non-household transmission probabilities
-  microdistancing = variable(lower = 0, upper = 1),
+  microdistancing = variable(lower = 0, upper = 1)
   
-  # a correction factor for the effect of vaccination, since VE estimates are
-  # uncertain
-  vaccine_effect_scaling = normal(1, 0.05, truncation = c(0, Inf))
+  # # a correction factor for the effect of vaccination, since VE estimates are
+  # # uncertain
+  # vaccine_effect_scaling = normal(1, 0.05, truncation = c(0, Inf))
   
 )
 
@@ -440,7 +418,7 @@ setting_ngms <- mapply(
   SIMPLIFY = FALSE
 )
 
-vaccine_effect <- vaccine_effect_raw * parameters$vaccine_effect_scaling
+vaccine_effect <- vaccine_effect_raw # * parameters$vaccine_effect_scaling
 
 # and create NGMs with of vaccination, mobility, and microdistancing
 setting_ngms_study_period <- list(
@@ -497,7 +475,7 @@ stable_age_distribution_grouped_unscaled <- tapply(
 stable_age_distribution_grouped <- stable_age_distribution_grouped_unscaled / sum(stable_age_distribution_grouped_unscaled)
 
 # relevel infections to prevent it from overwhelming the likelihood
-infections <- round(england_infections$infections * 500 / sum(england_infections$infections))
+infections <- round(england_infections$infections * 1000 / sum(england_infections$infections))
 
 counts <- as_data(t(infections))
 
@@ -519,14 +497,13 @@ distribution(counts) <- multinomial(
 
 Rt_mean <- 1
 Rt_interval <- c(0.9, 1.1)
-Rt_sd <- mean(abs(Rt_mean - Rt_interval)) / qnorm(0.975, 0, 1)
-# Rt_sd <- 0.025
+Rt_sd <- mean(abs(Rt_mean - Rt_interval)) / qnorm(0.995, 0, 1)
 distribution(Rt_mean) <- normal(rt, sd = Rt_sd, truncation = c(0, Inf))
 
-# use a crude, wide estimate for Delta R0 (95% interval 5-8)
-R0_mean <- 7
-R0_sd <- 0.5
-# qnorm(c(0.025, 0.975), R0_mean, R0_sd)
+# use a fairly wide estimate for Delta R0 (95% interval 7.5-8.5)
+R0_mean <- 8
+R0_interval <- c(7.5, 8.5)
+R0_sd <- mean(abs(R0_mean - R0_interval)) / qnorm(0.995, 0, 1)
 distribution(R0_mean) <- normal(r0, sd = R0_sd, truncation = c(0, Inf))
 
 # compute the hSAR and define a likelihood for that
@@ -548,7 +525,8 @@ distribution(hSAR_mean) <- normal(hSAR, hSAR_sd, truncation = c(0, 1))
 ss_index <- ons_index$age %in% 11:16
 ssSAR <- mean(setting_transmission_matrices_scaled$school[ss_index, ss_index])
 ssSAR_mean <- 0.01
-ssSAR_sd <- 0.005
+ssSAR_interval <- c(0, 0.02)
+ssSAR_sd <- mean(abs(ssSAR_mean - ssSAR_interval)) / qnorm(0.975, 0, 1)
 # qnorm(0.975, ssSAR_mean, ssSAR_sd)
 distribution(ssSAR_mean) <- normal(ssSAR, ssSAR_sd, truncation = c(0, 1))
 
@@ -559,10 +537,14 @@ m <- model(
   school_scaling,
   work_scaling,
   other_scaling,
-  microdistancing,
-  vaccine_effect_scaling
+  microdistancing
+  # vaccine_effect_scaling
 )
-draws <- mcmc(m)
+draws <- mcmc(
+  m,
+  chains = 10,
+  warmup = 1000
+)
 
 # check sampling
 coda::gelman.diag(draws, autoburnin = FALSE, multivariate = FALSE)
@@ -619,7 +601,6 @@ estimated_calibration_stats <- calculate(
 ) %>%
   lapply(c)
 
-hSAR
 sSAR <- mean_attack_rate(
   transmission_probability_matrix = setting_transmission_matrices_scaled$school,
   contact_matrix = setting_contact_matrices$school,
@@ -649,9 +630,8 @@ estimated_attack_rates <- calculate(
 estimated_calibration_stats
 estimated_attack_rates
 
-# try changing the 'other' matrix to be the marginal home matrix
 
-
+do.call(c, estimates[1:4])
 # output scalings and change conmat to use them
 
 # compare with infection age distribution in UK pre-Delta and pre-vaccination (pre-lockdown?)

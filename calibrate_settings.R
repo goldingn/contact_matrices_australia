@@ -8,20 +8,23 @@ age_lookup <- get_age_group_lookup(
   age_breaks
 )
 
+# set the order of the setting-specific matrices, to ensure they are always aligned
+setting_order <- c("home", "school", "work", "other")
+
+
 # get age-distribution of infections in England
 england_infections <- get_england_infections()
 
 # compute vaccine efficacy against onward infection and onward transmission,
-
-# assuming mean of pfizer and AZ assumptions from latest parameters doc
+# assume pfizer efficacy from latest parameters doc
 efficacy <- list(
   infection = list(
-    dose_1_only = 0.61,
-    dose_2 = 0.73
+    dose_1_only = 0.57,
+    dose_2 = 0.8
   ),
   onward_transmission = list(
-    dose_1_only = 0.07,
-    dose_2 = 0.51
+    dose_1_only = 0.13,
+    dose_2 = 0.65
   )
 )
 
@@ -290,13 +293,13 @@ england_population <- get_england_population() %>%
     lower.age.limit = age
   )
 
-
+# get setting-specific contact matrices in the right order
 setting_contact_matrices <- predict_setting_contacts(
   contact_model = model,
   age_breaks = age_breaks,
   population = england_population,
   per_capita_household_size = uk_per_capita_household_size
-)[1:4]
+)[setting_order]
 
 # get a matrix of the effects of vaccination
 vaccine_effect <- outer(
@@ -346,9 +349,6 @@ vaccine_effect <- outer(
 #   FUN = "*"
 # )
 
-# plot_matrix(setting_transmission_matrices$household)
-# plot_matrix(relative_transmission_matrix)
-
 library(greta.dynamics)
 
 # compute scaling on reproduction in each setting to match the contact
@@ -367,6 +367,7 @@ microdistancing <- variable(lower = 0, upper = 1)
 # household_contacts * (1 - (1 - p) ^ scaling)
 # non_household_contacts * p * scaling
 
+# set up the scalings with the same names as the matrices
 setting_scalings <- list(
   scaling[1],
   scaling[2],
@@ -374,16 +375,17 @@ setting_scalings <- list(
   scaling[4]
 )
 
-names(setting_scalings) <- names(setting_contact_matrices)
 
-# choose baseline transmision matrices
+names(setting_scalings) <- setting_order
+
+# choose baseline transmission matrices and ensure they are in the same order as the contact matrices
 setting_transmission_matrices <-
   list(
     home = transmission_matrices$household,
     school = transmission_matrices$work_education,
     work = transmission_matrices$work_education,
     other = transmission_matrices$events_activities
-  )
+  )[setting_order]
 
 # scale each of them
 setting_transmission_matrices_scaled <- 
@@ -392,21 +394,23 @@ setting_transmission_matrices_scaled <-
     school = setting_transmission_matrices$school * setting_scalings$school,
     work = setting_transmission_matrices$work * setting_scalings$work,
     other = setting_transmission_matrices$other * setting_scalings$other
-  )
+  )[setting_order]
 
-# creat NGMs in the bsence of vaccination, mobility. or microdistancing
+# create NGMs in the absence of vaccination, mobility., or microdistancing
 setting_ngms <- mapply(
   "*",
   setting_contact_matrices,
-  setting_transmission_matrices_scaled
+  setting_transmission_matrices_scaled,
+  SIMPLIFY = FALSE
 )
 
+# and create NGMs with of vaccination, mobility, and microdistancing
 setting_ngms_study_period <- list(
   home = setting_ngms$home * vaccine_effect,
   school = setting_ngms$school * uk_mobility_effect * microdistancing * vaccine_effect,
   work = setting_ngms$work * uk_mobility_effect * microdistancing * vaccine_effect,
   other = setting_ngms$other * uk_mobility_effect * microdistancing * vaccine_effect
-)
+)[setting_order]
 
 # get next generation matrix, pre-vaccination, by summing these matrices
 ngm_pre_pandemic <- Reduce("+", setting_ngms)
@@ -589,16 +593,17 @@ estimated_calibration_stats <- calculate(
 ) %>%
   lapply(c)
 
-# compute attack rates in each setting
-# estimated_attack_rates <- calculate(
-#   ngm,
-#   r0,
-#   hSAR,
-#   ssSAR,
-#   values = estimates
-# ) %>%
-#   lapply(c)
+# compute attack rates in each setting for a pair of 40 year olds
+estimated_attack_rates <- calculate(
+  setting_transmission_matrices_scaled$home[41, 41],
+  setting_transmission_matrices_scaled$school[41, 41],
+  setting_transmission_matrices_scaled$work[41, 41],
+  setting_transmission_matrices_scaled$other[41, 41],
+  values = estimates
+) %>%
+  lapply(c)
 
+estimated_attack_rates
 estimated_calibration_stats
 
 # add a parameter for overall vaccine efficacy on transmission being different

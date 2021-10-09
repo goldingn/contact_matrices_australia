@@ -327,65 +327,60 @@ pop_vec <- england_population %>%
     population
   )
 
-# # compute marginals of household transmission parameters and recombine, as a way
-# # of factoring out household-specific mixing effects (like higher-risk
-# # inter-couple, parent-child, grandparent-child contact). Want to weight over
-# # the most commonly observed age pairs (to downwieight areas computed from
-# # little data), but without the age data, we have toi assume this is
-# # proportional to the contact rate estimates
-# 
-# home_contacts <- conmat::matrix_to_predictions(setting_contact_matrices$home)
-# household_transmissions <- conmat::matrix_to_predictions(setting_transmission_matrices$household)
-# home_contact_transmissions <- home_contacts %>%
-#   mutate(
-#     probability = household_transmissions$contacts
-#   )
-# 
-# relative_susceptibility <- home_contact_transmissions %>%
-#   group_by(age_group_to) %>%
-#   summarise(
-#     probability = weighted.mean(probability, contacts),
-#     .groups = "drop"
-#   ) %>%
-#   mutate(
-#     probability = probability / max(probability)
-#   )
-#   
-# 
-# relative_infectiousness <- home_contact_transmissions %>%
-#   group_by(age_group_from) %>%
-#   summarise(
-#     probability = weighted.mean(probability, contacts),
-#     .groups = "drop"
-#   ) %>%
-#   mutate(
-#     probability = probability / max(probability)
-#   )
-# 
-# relative_transmission_matrix <- outer(
-#   relative_infectiousness$probability,
-#   relative_susceptibility$probability,
-#   FUN = "*"
-# )
+# compute marginals of household transmission parameters and recombine, as a way
+# of factoring out household-specific mixing effects (like higher-risk
+# inter-couple, parent-child, grandparent-child contact). Want to weight over
+# the most commonly observed age pairs (to downwieight areas computed from
+# little data), but without the age data, we have toi assume this is
+# proportional to the contact rate estimates
 
-library(greta.dynamics)
+home_contacts <- conmat::matrix_to_predictions(setting_contact_matrices$home)
+household_transmissions <- conmat::matrix_to_predictions(transmission_matrices$household)
+home_contact_transmissions <- home_contacts %>%
+  mutate(
+    probability = household_transmissions$contacts
+  )
 
+relative_susceptibility <- home_contact_transmissions %>%
+  group_by(age_group_to) %>%
+  summarise(
+    probability = weighted.mean(probability, contacts),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    probability = probability / max(probability)
+  )
+
+
+relative_infectiousness <- home_contact_transmissions %>%
+  group_by(age_group_from) %>%
+  summarise(
+    probability = weighted.mean(probability, contacts),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    probability = probability / max(probability)
+  )
+
+relative_transmission_matrix <- outer(
+  relative_infectiousness$probability,
+  relative_susceptibility$probability,
+  FUN = "*"
+)
 
 # choose baseline transmission probability matrices and ensure they are in the
 # correct order
 setting_transmission_matrices <-
   list(
     home = transmission_matrices$household,
-    school = transmission_matrices$work_education,
-    work = transmission_matrices$work_education,
-    other = transmission_matrices$events_activities
+    school = relative_transmission_matrix,
+    work = relative_transmission_matrix,
+    other = relative_transmission_matrix
   )[setting_order]
 
-# compute scaling on transmission probabilities in each setting to match the contact
-# definition implicit in conmat (polymod) estimates.
 
-# Scale household transmission binomially (transmission saturates at number of
-# contacts), and non-household transmission linearly
+# start fitting the model
+library(greta.dynamics)
 
 # compute population mean work attack rate from unscaled
 work_mean_unscaled <- mean_attack_rate(
@@ -624,23 +619,35 @@ estimated_calibration_stats <- calculate(
 ) %>%
   lapply(c)
 
+hSAR
+sSAR <- mean_attack_rate(
+  transmission_probability_matrix = setting_transmission_matrices_scaled$school,
+  contact_matrix = setting_contact_matrices$school,
+  population = pop_vec
+)
+wSAR <- mean_attack_rate(
+  transmission_probability_matrix = setting_transmission_matrices_scaled$work,
+  contact_matrix = setting_contact_matrices$work,
+  population = pop_vec
+)
+oSAR <- mean_attack_rate(
+  transmission_probability_matrix = setting_transmission_matrices_scaled$other,
+  contact_matrix = setting_contact_matrices$other,
+  population = pop_vec
+)
+
 # compute attack rates in each setting for a pair of 40 year olds
 estimated_attack_rates <- calculate(
-  setting_transmission_matrices_scaled$home[41, 41],
-  setting_transmission_matrices_scaled$school[41, 41],
-  setting_transmission_matrices_scaled$work[41, 41],
-  setting_transmission_matrices_scaled$other[41, 41],
+  hSAR,
+  sSAR,
+  wSAR,
+  oSAR,
   values = estimates
 ) %>%
   lapply(c)
 
 estimated_calibration_stats
 estimated_attack_rates
-
-
-
-# scaling for work and other seem crazy high, since we expect them to be lower than for home
-# so force them to be via parameterisation. school can be independent
 
 # try changing the 'other' matrix to be the marginal home matrix
 

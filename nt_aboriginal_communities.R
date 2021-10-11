@@ -311,25 +311,7 @@ urban_nt_ngm <- urban_nt_ngm_unscaled * m
 # 4. compute R0, TP, and vaccination effects in these communities
 
 
-# apply vaccination effect
-national_plan_vaccination <- readRDS("data/vacc_effect_by_age_scenario_19.RDS") %>%
-  ungroup() %>%
-  filter(
-    vacc_schoolkids
-  ) %>%
-  select(
-    -vacc_scenario,
-    -vacc_schoolkids,
-    -vacc_relative_efficacy
-  )
-
 # define aspirational coverage assumptions: 90%, 100%, with and without kids, with full double dose coverage
-combine_efficacy <- function(infection, transmission) {
-  1 - ((1 - infection) * (1 - transmission)) 
-}
-efficacy_az_2_dose <- combine_efficacy(0.67, 0.36)
-efficacy_pf_2_dose <- combine_efficacy(0.80, 0.65)
-
 australia_pop_fun <- abs_state_age %>%
   group_by(age_group) %>%
   summarise(
@@ -359,22 +341,8 @@ fraction_eligible_lookup <- tibble(
   age = 0:100
 ) %>%
   mutate(
-    lower = pmin(5 * age %/% 5, 80),
-    upper = lower + 4,
-    lower = as.character(lower),
-    upper = paste0("-", upper),
-    upper = str_replace(upper, "-84", "+"),
-    age_band_5y = paste0(lower, upper),
-    age_band_5y = factor(
-      age_band_5y,
-      levels = levels(national_plan_vaccination$age_band_5y)
-    )
-  ) %>%
-  select(-lower, -upper) %>%
-  mutate(
+    age_band_5y = cut(age, age_limits_5y, right = FALSE),
     population = australia_pop_fun(age),
-  ) %>%
-  mutate(
     eligible = age >= 12
   ) %>%
   group_by(age_band_5y) %>%
@@ -383,9 +351,9 @@ fraction_eligible_lookup <- tibble(
     .groups = "drop"
   )
     
-aspirational_vaccination <- expand_grid(
-  vacc_coverage = c(0.9, 1),
-  age_band_5y = unique(national_plan_vaccination$age_band_5y)
+vaccination_effects <- expand_grid(
+  vacc_coverage = seq(0.5, 1, by = 0.1),
+  age_band_5y = unique(fraction_eligible_lookup$age_band_5y)
 ) %>%
   left_join(
     fraction_eligible_lookup,
@@ -393,34 +361,48 @@ aspirational_vaccination <- expand_grid(
   ) %>%
   # add on average efficacy on transmission, given an assumed AZ/Pfizer mix, based on age groups
   mutate(
-    fraction_pfizer = case_when(
-      age_band_5y %in% c("60-64", "65-69", "70-74", "75-79", "80+") ~ 1,
-      TRUE ~ 1
-    ),
-    average_efficacy_transmission = fraction_pfizer * efficacy_pf_2_dose + (1 - fraction_pfizer) * efficacy_az_2_dose,
     proportion_vaccinated = vacc_coverage * fraction_eligible,
-    vacc_effect = 1 - proportion_vaccinated * average_efficacy_transmission
-  ) %>%
-  select(
-    -fraction_eligible,
-    -fraction_pfizer
+    ve_susceptibility = ve("susceptibility", fraction_pfizer = 1, fraction_dose_2 = 1),
+    ve_onward = ve("onward", fraction_pfizer = 1, fraction_dose_2 = 1),
+    across(
+      starts_with("ve"),
+      .fns = list(multiplier = ~1 - proportion_vaccinated * .x)
+    )
   )
 
 # apply vaccination
-aboriginal_tp_partial <- bind_rows(
-  national_plan_vaccination,
-  aspirational_vaccination
-) %>%
+aboriginal_tp_partial <- vaccination_effects %>%
+  # create vaccination effect matrix
   group_by(vacc_coverage) %>%
   summarise(
-    australia_tp_reduction = vacc_tp_reduction(vacc_effect, australia_ngm),
-    nt_tp_reduction = vacc_tp_reduction(vacc_effect, nt_ngm),
-    nt_remote_aboriginal_tp_reduction = vacc_tp_reduction(vacc_effect, remote_nt_ngm),
-    nt_urban_aboriginal_tp_reduction = vacc_tp_reduction(vacc_effect, urban_nt_ngm),
-    .groups = "drop"
+    vaccination_effect_matrix = list(
+      outer(
+        ve_susceptibility_multiplier,
+        ve_onward_multiplier,
+        FUN = "*"
+      )
+    )
+  ) %>%
+  # add on different ngms
+  rowwise() %>%
+  mutate(
+    australia = list(australia_ngm),
+    nt = list(nt_ngm),
+    nt_remote_indigenous = list(remote_nt_ngm),
+    nt_urban_indigenous = list(urban_nt_ngm),
+    across(
+      -starts_with("vacc"),
+      .fns = list(
+        tp_reduction = ~ get_R(.x * vaccination_effect_matrix) / get_R(.x)
+      )
+    )
+  ) %>%
+  select(
+    vacc_coverage,
+    ends_with("tp_reduction")
   ) %>%
   pivot_longer(
-    ends_with("reduction"),
+    ends_with("tp_reduction"),
     names_to = "population_group",
     values_to = "tp_multiplier"
   ) %>%
@@ -436,8 +418,8 @@ aboriginal_tp_partial <- bind_rows(
     tp_baseline = case_when(
       population_group == "australia" ~ get_R(australia_ngm),
       population_group == "nt" ~ get_R(nt_ngm),
-      population_group == "nt_remote_aboriginal" ~ get_R(remote_nt_ngm),
-      population_group == "nt_urban_aboriginal" ~ get_R(urban_nt_ngm)
+      population_group == "nt_remote_indigenous" ~ get_R(remote_nt_ngm),
+      population_group == "nt_urban_indigenous" ~ get_R(urban_nt_ngm)
     ),
     .before = tp_multiplier
   ) %>%
@@ -455,8 +437,8 @@ aboriginal_tp_partial <- bind_rows(
     scenario = case_when(
       population_group == "australia" ~ "All\nAustralia",
       population_group == "nt" ~ "All\nNT",
-      population_group == "nt_remote_aboriginal" ~ "Remote\nIndigenous",
-      population_group == "nt_urban_aboriginal" ~ "Urban\nIndigenous"
+      population_group == "nt_remote_indigenous" ~ "Remote\nIndigenous",
+      population_group == "nt_urban_indigenous" ~ "Urban\nIndigenous"
     ),
     scenario = factor(
       scenario,

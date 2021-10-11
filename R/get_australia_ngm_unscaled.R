@@ -31,19 +31,13 @@ get_australia_ngm_unscaled <- function(model, age_breaks) {
     ) %>%
     rowwise() %>%
     mutate(
-      household_size = get_mean_household_size(),
+      per_capita_household_size = get_per_capita_household_size(),
       setting_matrices = list(
         predict_setting_contacts(
           contact_model = model,
           population = population,
+          per_capita_household_size = per_capita_household_size,
           age_breaks = age_breaks
-        )
-      ),
-      setting_matrices = list(
-        adjust_household_contact_matrix(
-          setting_matrices = setting_matrices,
-          household_size = household_size,
-          population = population
         )
       ),
       contact_matrices = list(

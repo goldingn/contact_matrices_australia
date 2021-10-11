@@ -15,15 +15,12 @@ get_state_ngms_unscaled <- function(model, age_breaks) {
     age_breaks = age_breaks
   )
   
-
-  
-  
   tibble(
     state = unique(abs_pop_age_lga_2020$state)
   ) %>%
     rowwise() %>%
     mutate(
-      household_size = get_mean_household_size(
+      per_capita_household_size = get_per_capita_household_size(
         state = state
       ),
       population = list(
@@ -33,18 +30,12 @@ get_state_ngms_unscaled <- function(model, age_breaks) {
         predict_setting_contacts(
           contact_model = model,
           population = abs_age_state(state),
+          per_capita_household_size = per_capita_household_size,
           age_breaks = age_breaks
         )
       )
     ) %>%
     mutate(
-      setting_matrices = list(
-        adjust_household_contact_matrix(
-          setting_matrices = setting_matrices,
-          household_size = household_size,
-          population = population
-        )
-      ),
       contact_matrices = list(
         setting_matrices[c("home", "school", "work", "other")]
       ),

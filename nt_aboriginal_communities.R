@@ -253,9 +253,6 @@ plot_setting_matrices(remote_matrix_updated)
 plot_setting_matrices(urban_matrix_naive)
 plot_setting_matrices(urban_matrix_updated)
 
-get_R(urban_matrix_naive$all)
-get_R(urban_matrix_updated$all)
-
 # plot overall contact matrices
 plot_matrix(remote_matrix_naive$all) +
   ggtitle("Polymod extrapolated") +
@@ -291,6 +288,8 @@ urban_nt_ngm_unscaled <- get_unscaled_ngm(
   transmission_matrices = transmission_matrices
 )
 
+optimal_ttiq_baseline <- 2.93
+partial_ttiq_baseline <- 3.62
 
 m <- find_m(
   R_target = partial_ttiq_baseline,
@@ -298,6 +297,7 @@ m <- find_m(
 )
 
 australia_ngm <- australia_ngm_unscaled * m
+# get_R(australia_ngm)
 
 state_ngms <- lapply(state_ngms_unscaled, `*`, m)
 
@@ -309,11 +309,9 @@ urban_nt_ngm <- urban_nt_ngm_unscaled * m
 
 
 # 4. compute R0, TP, and vaccination effects in these communities
-optimal_ttiq_baseline <- 2.93
-partial_ttiq_baseline <- 3.62
 
 
-# apply vaccinqtion effect
+# apply vaccination effect
 national_plan_vaccination <- readRDS("data/vacc_effect_by_age_scenario_19.RDS") %>%
   ungroup() %>%
   filter(

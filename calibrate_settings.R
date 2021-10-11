@@ -8,42 +8,24 @@ age_lookup <- get_age_group_lookup(
   age_breaks
 )
 
+# set the order of the setting-specific matrices, to ensure they are always aligned
+setting_order <- c("home", "school", "work", "other")
+
 # get age-distribution of infections in England
 england_infections <- get_england_infections()
 
 # compute vaccine efficacy against onward infection and onward transmission,
-
-# assuming mean of pfizer and AZ assumptions from national plan phase 1
-# modelling
+# assume pfizer efficacy from latest parameters doc
 efficacy <- list(
   infection = list(
-    dose_1_only = 0.25,
-    dose_2 = 0.7
+    dose_1_only = 0.57,
+    dose_2 = 0.8
   ),
   onward_transmission = list(
-    dose_1_only = 0.47,
+    dose_1_only = 0.13,
     dose_2 = 0.65
   )
 )
-# 
-# # convert from multiple odds ratios to mean *reduction* in risk
-# from_OR <- function(..., p = 0.49) {
-#   ORs <- c(...)
-#   RRs <- ORs / (1 - p + (p * ORs))
-#   mean(1 - RRs)
-# }
-# 
-# # with eyre estimates, converting from odds ratios with overall 49% positivity in the unvaccinated
-# efficacy <- list(
-#   infection = list(
-#     dose_1_only = from_OR(0.54, 0.58),
-#     dose_2 = from_OR(0.28, 0.1)
-#   ),
-#   onward_transmission = list(
-#     dose_1_only = from_OR(0.98, 0.87),
-#     dose_2 = from_OR(0.65, 0.35)
-#   )
-# )
 
 england_vaccination_effect <- get_england_vaccination_coverage() %>%
   mutate(
@@ -73,6 +55,187 @@ england_vaccination_effect <- get_england_vaccination_coverage() %>%
     .groups = "drop"
   )
 
+
+google_spec <- cols(
+  country_region_code = col_character(),
+  country_region = col_character(),
+  sub_region_1 = col_character(),
+  sub_region_2 = col_character(),
+  metro_area = col_logical(),
+  iso_3166_2_code = col_character(),
+  census_fips_code = col_logical(),
+  place_id = col_character(),
+  date = col_date(format = ""),
+  retail_and_recreation_percent_change_from_baseline = col_double(),
+  grocery_and_pharmacy_percent_change_from_baseline = col_double(),
+  parks_percent_change_from_baseline = col_double(),
+  transit_stations_percent_change_from_baseline = col_double(),
+  workplaces_percent_change_from_baseline = col_double(),
+  residential_percent_change_from_baseline = col_double()
+)
+
+# compute the percentage reduction in non-household contacts based on Google
+# mobility and Australia-calibrated mobility model
+uk_mobility_effect <- bind_rows(
+  read_csv(
+    "data/2020_GB_Region_Mobility_Report.csv",
+    col_types = google_spec
+  ),
+  read_csv(
+    "data/2021_GB_Region_Mobility_Report.csv",
+    col_types = google_spec
+  )
+) %>%
+  # get all-UK estimate
+  filter(
+    is.na(sub_region_1)
+  ) %>%
+  # convert to long-form with metrics and dates
+  select(
+    date,
+    ends_with("_percent_change_from_baseline")
+  ) %>%
+  bind_rows(
+    tibble(
+      date = as.Date("2019-12-31"),
+      retail_and_recreation_percent_change_from_baseline = 0,
+      grocery_and_pharmacy_percent_change_from_baseline = 0,
+      parks_percent_change_from_baseline = 0,
+      transit_stations_percent_change_from_baseline = 0,
+      workplaces_percent_change_from_baseline = 0,
+      residential_percent_change_from_baseline = 0
+    )
+  ) %>%
+  mutate(
+    intercept_percent_change_from_baseline = NA
+  ) %>%
+  pivot_longer(
+    cols = ends_with("_percent_change_from_baseline"),
+    names_to = "setting",
+    values_to = "percent_change"
+  ) %>%
+  # transform metrics for modelling
+  mutate(
+    across(
+      setting,
+      ~str_remove(.x, "_percent_change_from_baseline")
+    ),
+    covariate = case_when(
+      setting == "intercept" ~ 1,
+      TRUE ~ log(1 + percent_change / 100)
+    )
+  ) %>%
+  filter(
+    setting != "grocery_and_pharmacy"
+  ) %>%
+  # add on model coefficients
+  mutate(
+    coefficient = case_when(
+      setting == "intercept" ~ 2.440755,
+      setting == "parks" ~ 0.007651,
+      setting == "residential" ~ -2.253547,
+      setting == "retail_and_recreation" ~ 0.684079,
+      setting == "transit_stations" ~ 0.024566,
+      setting == "workplaces" ~ 0.572682,
+    ),
+    term = coefficient * covariate
+  ) %>%
+  group_by(
+    date
+  ) %>%
+  summarise(
+    non_household_contacts = exp(sum(term)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    period = case_when(
+      date == as.Date("2019-12-31") ~ "baseline",
+      date >= as.Date("2021-09-01") & date >= as.Date("2021-09-22") ~ "study",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(
+    !is.na(period)
+  ) %>%
+  group_by(
+    period
+  ) %>%
+  summarise(
+    non_household_contacts = mean(non_household_contacts)
+  ) %>%
+  pivot_wider(
+    names_from = period,
+    values_from = non_household_contacts
+  ) %>%
+  mutate(
+    ratio = study / baseline
+  ) %>%
+  pull(ratio)
+
+
+mobility_ratios <- bind_rows(
+  read_csv(
+    "data/2020_GB_Region_Mobility_Report.csv",
+    col_types = google_spec
+  ),
+  read_csv(
+    "data/2021_GB_Region_Mobility_Report.csv",
+    col_types = google_spec
+  )
+) %>%
+  # get all-UK estimate
+  filter(
+    is.na(sub_region_1)
+  ) %>%
+  # convert to long-form with metrics and dates
+  select(
+    date,
+    ends_with("_percent_change_from_baseline")
+  ) %>%
+  pivot_longer(
+    cols = ends_with("_percent_change_from_baseline"),
+    names_to = "setting",
+    values_to = "percent_change"
+  ) %>%
+  # transform metrics for modelling
+  mutate(
+    across(
+      setting,
+      ~str_remove(.x, "_percent_change_from_baseline")
+    ),
+    ratio = 1 + percent_change / 100
+  ) %>%
+  filter(
+    date >= as.Date("2021-09-01"),
+    date >= as.Date("2021-09-22"),
+  ) %>%
+  mutate(
+    setting = case_when(
+      setting == "residential" ~ "home",
+      setting %in% c("retail_and_recreation", "grocery_and_pharmacy") ~ "other",
+      setting == "workplaces" ~ "work",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  group_by(
+    setting
+  ) %>%
+  summarise(
+    across(
+      ratio,
+      mean
+    )
+  ) %>%
+  filter(
+    !is.na(setting)
+  ) %>%
+  pivot_wider(
+    names_from = setting,
+    values_from = ratio
+  )
+
+mobility_ratios
+
 # build England-specific contact matrices
 
 # fit contact model to polymod
@@ -82,7 +245,7 @@ model <- fit_setting_contacts(
 )
 
 # get setting- and age-specific transmission probabilities in these bins
-setting_transmission <- read_csv(
+transmission <- read_csv(
   "outputs/eyre_setting_transmission_probabilities.csv",
   col_types = cols(
     setting = col_character(),
@@ -142,7 +305,7 @@ setting_transmission <- read_csv(
   )
 
 # convert to a list of matrices
-setting_transmission_matrices <- setting_transmission %>%
+transmission_matrices <- transmission %>%
   nest(
     data = c(case_age, contact_age, probability)
   ) %>%
@@ -167,7 +330,7 @@ setting_transmission_matrices <- setting_transmission %>%
 # https://www.ons.gov.uk/peoplepopulationandcommunity/birthsdeathsandmarriages/families/datasets/familiesandhouseholdsfamiliesandhouseholds
 # convert to population-average (not household average) household size, assuming
 # households of 7+ all have size 7
-uk_household_sizes <- tribble(
+uk_per_capita_household_size <- tribble(
   ~household_size, ~n_households,
   1, 7898,
   2, 9675,
@@ -182,7 +345,10 @@ uk_household_sizes <- tribble(
     fraction = n_people / sum(n_people)
   ) %>%
   summarise(
-    mean_household_size = sum(household_size * fraction)
+    per_capita_household_size = sum(household_size * fraction)
+  ) %>%
+  pull(
+    per_capita_household_size
   )
 
 england_population <- get_england_population() %>%
@@ -190,48 +356,42 @@ england_population <- get_england_population() %>%
     lower.age.limit = age
   )
 
-# return a list of setting-specific contact matrices for England states,
-# accounting for population age distributions and household sizes
-setting_contact_matrices <- tibble(
-  household_size = uk_household_sizes$mean_household_size,
-  population = list(england_population)
-) %>%
-  rowwise() %>%
-  mutate(
-    setting_matrices = list(
-      predict_setting_contacts(
-        contact_model = model,
-        population = population,
-        age_breaks = age_breaks
-      )
-    )
-  ) %>%
-  mutate(
-    setting_matrices = list(
-      adjust_household_contact_matrix(
-        setting_matrices = setting_matrices,
-        household_size = household_size,
-        population = population
-      )
-    ),
-  ) %>%
-  select(
-    setting_matrices
-  ) %>%
-  unnest(
-    cols = c(setting_matrices)
-  ) %>%
-  pull(setting_matrices) %>%
-  `[`(1:4)
+# get setting-specific contact matrices in the right order
+setting_contact_matrices <- predict_setting_contacts(
+  contact_model = model,
+  age_breaks = age_breaks,
+  population = england_population,
+  per_capita_household_size = uk_per_capita_household_size
+)[setting_order]
 
 # get a matrix of the effects of vaccination
-vaccine_effect <- outer(
+vaccine_effect_raw <- outer(
   england_vaccination_effect$infection_multiplier,
   england_vaccination_effect$onward_transmission_multiplier,
   FUN = "*"
 )
+ 
+# aggregate population over age breaks
+pop_vec <- england_population %>%
+  left_join(
+    age_lookup,
+    by = c(lower.age.limit = "age")
+  ) %>%
+  group_by(
+    age_group
+  ) %>%
+  summarise(
+    across(
+      population,
+      sum
+    ),
+    .groups = "drop"
+  ) %>%
+  pull(
+    population
+  )
 
-# compute marginals of household transmission paramters and recombine, as a way
+# compute marginals of household transmission parameters and recombine, as a way
 # of factoring out household-specific mixing effects (like higher-risk
 # inter-couple, parent-child, grandparent-child contact). Want to weight over
 # the most commonly observed age pairs (to downwieight areas computed from
@@ -239,7 +399,7 @@ vaccine_effect <- outer(
 # proportional to the contact rate estimates
 
 home_contacts <- conmat::matrix_to_predictions(setting_contact_matrices$home)
-household_transmissions <- conmat::matrix_to_predictions(setting_transmission_matrices$household)
+household_transmissions <- conmat::matrix_to_predictions(transmission_matrices$household)
 home_contact_transmissions <- home_contacts %>%
   mutate(
     probability = household_transmissions$contacts
@@ -254,7 +414,7 @@ relative_susceptibility <- home_contact_transmissions %>%
   mutate(
     probability = probability / max(probability)
   )
-  
+
 
 relative_infectiousness <- home_contact_transmissions %>%
   group_by(age_group_from) %>%
@@ -272,49 +432,83 @@ relative_transmission_matrix <- outer(
   FUN = "*"
 )
 
-# plot_matrix(setting_transmission_matrices$household)
-# plot_matrix(relative_transmission_matrix)
+# choose baseline transmission probability matrices and ensure they are in the
+# correct order
+setting_transmission_matrices <- list(
+  home = transmission_matrices$household,
+  school = transmission_matrices$work_education,
+  work = transmission_matrices$work_education,
+  other = transmission_matrices$work_education
+)[setting_order]
 
+
+# start fitting the model
 library(greta.dynamics)
 
-# compute the set of weights that best fit the VIC case data
-# make them sum to 1, since the stable age distribution is invariant to the  
-weights <- simplex_variable(4)
-
-setting_weights <- list(
-  weights[1],
-  weights[2],
-  weights[3],
-  weights[4]
+# all parameters
+parameters <- list(
+  
+  # scaling parameters for transmission probabilities
+  home_scaling = variable(lower = 0),
+  non_household_scaling = variable(lower = 0),
+  
+  # a microdistancing effect to reduce non-household contact rates - reflecting
+  # voluntary measures to reduce non-household transmission probabilities
+  microdistancing = variable(lower = 0, upper = 1),
+  
+  # a correction factor for the effect of vaccination, since VE estimates are
+  # uncertain and UK has lots of prior immunity
+  vaccine_effect_scaling = normal(1, 0.1, truncation = c(0, 1))
+  
 )
 
-names(setting_weights) <- names(setting_contact_matrices)
+# scale each of the transmission probability matrices
+# home is scaled binimially as contacts saturate
+setting_transmission_matrices_scaled <- 
+  list(
+    # scaling home transmission by correction factor and by increased duration at home
+    home = 1 - (1 - setting_transmission_matrices$home) ^ parameters$home_scaling,
+    school = setting_transmission_matrices$school * parameters$non_household_scaling,
+    work = setting_transmission_matrices$work * parameters$non_household_scaling,
+    other = setting_transmission_matrices$other * parameters$non_household_scaling
+  )[setting_order]
 
-setting_weighted_contacts <- mapply(
-  `*`,
+# create NGMs in the absence of vaccination, mobility., or microdistancing
+setting_ngms <- mapply(
+  "*",
   setting_contact_matrices,
-  setting_weights,
+  setting_transmission_matrices_scaled,
   SIMPLIFY = FALSE
 )
 
-# get next generation matrix, pre-vaccination, by weighting these matrices
-ngm_pre_vacc <- setting_weighted_contacts$home * setting_transmission_matrices$household +
-  setting_weighted_contacts$school * setting_transmission_matrices$work_education +
-  setting_weighted_contacts$work * setting_transmission_matrices$work_education +
-  setting_weighted_contacts$other * setting_transmission_matrices$events_activities
+vaccine_effect <- vaccine_effect_raw * parameters$vaccine_effect_scaling
 
-# apply vaccination effects, with parameter for reduced effectiveness of
-# vaccines relative to assumed
-ngm <- ngm_pre_vacc * vaccine_effect
+# and create NGMs with of vaccination, mobility, and microdistancing
+setting_ngms_study_period <- list(
+  home = setting_ngms$home * mobility_ratios$home * vaccine_effect,
+  school = setting_ngms$school * vaccine_effect,
+  work = setting_ngms$work * mobility_ratios$work *
+    parameters$microdistancing * vaccine_effect,
+  other = setting_ngms$other * mobility_ratios$other *
+    parameters$microdistancing * vaccine_effect
+)[setting_order]
+
+# get next generation matrix, pre-vaccination, by summing these matrices
+ngm_pre_pandemic <- Reduce("+", setting_ngms)
+
+# apply vaccination effects and non-household distancing effects
+ngm <- Reduce("+", setting_ngms_study_period)
 
 # use better initial age distribution for faster sampling
-ngm_unscaled  <- Reduce("+", setting_contact_matrices) * setting_transmission_matrices$household * vaccine_effect
+ngm_unscaled  <- Reduce("+", setting_contact_matrices) * setting_transmission_matrices$home * vaccine_effect_raw
 stable_age <- Re(eigen(ngm_unscaled)$vectors[, 1])
 initial <- stable_age / sum(stable_age)
 
-solutions <- greta.dynamics::iterate_matrix(ngm, initial_state = initial)
-stable_age_distribution <- solutions$stable_distribution
+# calculate the stable solutions in the face of vaccination
+rt_solutions <- greta.dynamics::iterate_matrix(ngm, initial_state = initial)
+stable_age_distribution <- rt_solutions$stable_distribution
 
+# get index to aggregate stable state and match age distribution of infections
 ons_index <- get_ons_age_group_lookup() %>%
   filter(
     age <= max(age_breaks[is.finite(age_breaks)])
@@ -334,34 +528,95 @@ stable_age_distribution_grouped_unscaled <- tapply(
 
 stable_age_distribution_grouped <- stable_age_distribution_grouped_unscaled / sum(stable_age_distribution_grouped_unscaled)
 
-# relevel infections so that the sample size represents the approximately 150K samples in each fortnight of estimates
-infections <- round(england_infections$infections * 150000 / sum(england_infections$infections))
+# relevel infections to prevent it from overwhelming the likelihood
+infections <- round(england_infections$infections * 1000 / sum(england_infections$infections))
 
 counts <- as_data(t(infections))
 
-# define the likelihood
+# define the likelihood for the age distribution of infections
 distribution(counts) <- multinomial(
   size = sum(infections),
   prob = t(stable_age_distribution_grouped)
 )
 
+# compute the hSAR and define a likelihood for that
+hSAR <- mean_attack_rate(
+  transmission_probability_matrix = setting_transmission_matrices_scaled$home,
+  contact_matrix = setting_contact_matrices$home,
+  population = pop_vec
+)
+
+# based on parameters doc reasonable range for Delta hSAR (corresponds to final
+# attack rates above 70%)
+hSAR_interval <- c(0.2, 0.35)
+hSAR_mean <- mean(hSAR_interval)
+hSAR_sd <- mean(abs(hSAR_mean - hSAR_interval)) / qnorm(0.975, 0, 1)
+distribution(hSAR_mean) <- normal(hSAR, hSAR_sd, truncation = c(0, 1))
+
+# add likelihoods for reasonable SARs in school, work and other (assuming lower
+# than home)
+sSAR <- mean_attack_rate(
+  transmission_probability_matrix = setting_transmission_matrices_scaled$school,
+  contact_matrix = setting_contact_matrices$school,
+  population = pop_vec
+)
+
+wSAR <- mean_attack_rate(
+  transmission_probability_matrix = setting_transmission_matrices_scaled$work,
+  contact_matrix = setting_contact_matrices$work,
+  population = pop_vec
+)
+
+oSAR <- mean_attack_rate(
+  transmission_probability_matrix = setting_transmission_matrices_scaled$other,
+  contact_matrix = setting_contact_matrices$other,
+  population = pop_vec
+)
+
+SAR_interval <- c(0, 0.1)
+SAR_mean <- mean(SAR_interval)
+SAR_sd <- mean(abs(SAR_mean - SAR_interval)) / qnorm(0.975, 0, 1)
+
+distribution(SAR_mean) <- normal(sSAR, SAR_sd, truncation = c(0, 1))
+distribution(SAR_mean) <- normal(wSAR, SAR_sd, truncation = c(0, 1))
+distribution(SAR_mean) <- normal(oSAR, SAR_sd, truncation = c(0, 1))
+
 # fit the model by HMC
-m <- model(weights) # , vaccine_multiplier)
-draws <- mcmc(m)
+attach(parameters)
+m <- model(
+  home_scaling,
+  non_household_scaling,
+  microdistancing,
+  vaccine_effect_scaling
+)
+
+draws <- mcmc(
+  m,
+  chains = 10,
+  warmup = 500,
+  n_samples = 300
+)
 
 # check sampling
 coda::gelman.diag(draws, autoburnin = FALSE, multivariate = FALSE)
 bayesplot::mcmc_trace(draws)
 
-# get posterior mean of weights parameter (ensuring it sums to 1)
-weights_posterior_mean <- summary(draws)$statistics[, "Mean"]
-weights_posterior_mean <- weights_posterior_mean / sum(weights_posterior_mean)
-names(weights_posterior_mean) <- names(setting_weights)
+# get posterior means of parameters
+estimates <- do.call(
+  calculate,
+  c(parameters,
+    list(
+      values = draws,
+      nsim = 4e3
+    )
+  )
+) %>%
+  lapply(mean)
 
 # and compute stable age distribution based on the posterior mean
 stable_age_post_grouped <- calculate(
   stable_age_distribution_grouped,
-  values = list(weights = weights_posterior_mean)
+  values = estimates
 )[[1]][, 1]
 
 # compare outputs
@@ -377,6 +632,34 @@ barplot(infections,
         ylab = "number of infections",
         names.arg = england_infections$age_group)
 
+# check the reproduction number estimate matches England estimates
+plot(
+  calculate(
+    hSAR,
+    sSAR,
+    wSAR,
+    oSAR,
+    values = draws
+  )
+)
 
-setting_relative_weights <- weights_posterior_mean / weights_posterior_mean[1]
-dput(setting_relative_weights)
+estimated_calibration_stats <- calculate(
+  hSAR,
+  sSAR,
+  wSAR,
+  oSAR,
+  values = estimates
+) %>%
+  lapply(c)
+
+estimated_calibration_stats
+
+
+dput(
+  c(
+    home = estimates$home_scaling,
+    school = estimates$non_household_scaling,
+    work = estimates$non_household_scaling,
+    other = estimates$non_household_scaling
+  )
+)

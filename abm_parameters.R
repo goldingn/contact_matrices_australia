@@ -28,17 +28,12 @@ australia_pop <- abs_pop_age_lga_2020 %>%
   )
 
 # get Australia-wide setting-specific contact matrices
-australia_setting_contact_matrices_unadjusted_5y <- predict_setting_contacts(
+# with adjustment to the household size
+australia_setting_contact_matrices_5y <- predict_setting_contacts(
   contact_model = setting_models,
   population = australia_pop,
+  per_capita_household_size = get_per_capita_household_size(),
   age_breaks = age_breaks
-)
-
-# and adjust the household size
-australia_setting_contact_matrices_5y <- adjust_household_contact_matrix(
-  setting_matrices = australia_setting_contact_matrices_unadjusted_5y,
-  household_size = get_mean_household_size(),
-  population = australia_pop
 )
 
 # get the setting-specific contact matrices
@@ -225,8 +220,8 @@ transmission_household_5y <- australia_setting_ngms_5y$home / australia_setting_
 transmission_nonhousehold_5y <- australia_nonhousehold_ngm_5y / australia_nonhousehold_contacts_5y
 
 setting_transmission_probabilities_for_bec <- bind_rows(
-  household = matrix_to_predictions(transmission_household),
-  nonhousehold = matrix_to_predictions(transmission_nonhousehold),
+  household = matrix_to_predictions(transmission_household_5y),
+  nonhousehold = matrix_to_predictions(transmission_nonhousehold_5y),
   .id = "setting"
 ) %>%
   rename(
@@ -236,7 +231,7 @@ setting_transmission_probabilities_for_bec <- bind_rows(
 write_csv(setting_transmission_probabilities_for_bec,
           file = "outputs/setting_transmission_probabilities_for_bec.csv")
   
-nt_first_nations_contact_matrices <- readRDS("outputs/nt_first_nations_contact_matrices.RDS")
+nt_first_nations_contact_matrices <- readRDS("nt_first_nations_contact_matrices_updated.RDS")
 dir.create("outputs/bec_contact_matrices", showWarnings = FALSE)
 for (population in names(nt_first_nations_contact_matrices)) {
   
@@ -451,3 +446,4 @@ nsw_setting_contacts %>%
   coord_flip() +
   xlab("") +
   theme_minimal()
+

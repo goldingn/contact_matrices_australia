@@ -482,7 +482,7 @@ aboriginal_tp <- readRDS(
 colours <- RColorBrewer::brewer.pal(3, "Set2")
 
 baseline_colour <- washout(colours[2], 0.8)
-vaccine_colours <- washout(colours[3], c(0.7, 0.5, 0.25, 0.1))
+vaccine_colours <- washout(colours[3], c(0.7, 0.65, 0.5, 0.35, 0.2, 0.1))
 
 border_colour <- grey(0.6)
 r0_colour <- grey(0.5)
@@ -531,10 +531,26 @@ for (ttiq_plot in c("partial", "optimal")) {
     ) %>%
     add_single_box(
       top = tp_baseline,
-      bottom = tp_coverage_0.7,
+      bottom = tp_coverage_0.5,
       box_colour = vaccine_colours[1],
-      text_main = "70%\nvaccination\ncoverage",
+      text_main = "50%\nvaccination\ncoverage",
       only_scenarios = first_scenario
+    ) %>%
+    add_stacked_box(
+      top = tp_coverage_0.5,
+      bottom = tp_coverage_0.6,
+      reference = tp_baseline_vacc,
+      text_main = "60%",
+      only_scenarios = first_scenario,
+      box_colour = vaccine_colours[2]
+    ) %>%
+    add_stacked_box(
+      top = tp_coverage_0.6,
+      bottom = tp_coverage_0.7,
+      reference = tp_baseline_vacc,
+      text_main = "70%",
+      only_scenarios = first_scenario,
+      box_colour = vaccine_colours[3]
     ) %>%
     add_stacked_box(
       top = tp_coverage_0.7,
@@ -542,7 +558,7 @@ for (ttiq_plot in c("partial", "optimal")) {
       reference = tp_baseline_vacc,
       text_main = "80%",
       only_scenarios = first_scenario,
-      box_colour = vaccine_colours[2]
+      box_colour = vaccine_colours[4]
     ) %>%
     add_stacked_box(
       top = tp_coverage_0.8,
@@ -550,7 +566,7 @@ for (ttiq_plot in c("partial", "optimal")) {
       reference = tp_baseline_vacc,
       text_main = "90%",
       only_scenarios = first_scenario,
-      box_colour = vaccine_colours[3]
+      box_colour = vaccine_colours[5]
     ) %>%
     add_stacked_box(
       top = tp_coverage_0.9,
@@ -558,7 +574,7 @@ for (ttiq_plot in c("partial", "optimal")) {
       reference = tp_baseline_vacc,
       text_main = "100%",
       only_scenarios = first_scenario,
-      box_colour = vaccine_colours[4]
+      box_colour = vaccine_colours[6]
     ) %>%
     add_arrow(8) +
     theme(

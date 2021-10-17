@@ -1,6 +1,23 @@
 # calibrate setting weights against case age distribution data from england over
 # time, with Delta, post-reopening and pre-vaccination of 12-15 year olds
 
+
+# to do:
+
+# add Rt and R0 estimates back in as likelihoods - DONE
+
+# roll forward to most recent UK infection age distribution data (includes spike
+# in 12-15s) - DONE
+
+# ditch Eyre, and infer susceptibility profile as a GP with Davies estiamtee as
+# a prior mean
+
+# still learn household/non-household weights
+
+# try learning the scaling on asymptomatic onwards transmission
+
+# use smoothed Davies estimates for susceptibility and clinical fraction
+
 # define model age limits (integer years from 2-85, as per prevalence data extents)
 age_breaks <- c(seq(0, 80, by = 1), Inf)
 
@@ -27,6 +44,16 @@ efficacy <- list(
   )
 )
 
+# Use coverage data from immediately before comencement of 12-15 vacciantion
+# program. This is a pragmatic decision because UK does not yet report 12-15
+# vaccination coverage separately from 16-17 year olds in a machine-readable
+# format. Unlike 12-15 year olds, 16-17 year olds have been elibigile for a long
+# period and have ikely considerably higher coverage. Whilst this incorrectly
+# assumes no vaccine protection of 12-15 year olds. However coverage of this age
+# group as at October 15 was low (https://www.bbc.com/news/health-55274833),
+# first dose only, and given the lag to immunity will likely have minimal effect
+# on transmission. This would also only bias estimates of susceptibility of
+# 12-15s, relative to e.g. under-12s, *down*, rather than up.
 england_vaccination_effect <- get_england_vaccination_coverage() %>%
   mutate(
     dose_1_only = dose_1 - dose_2,
@@ -391,6 +418,19 @@ pop_vec <- england_population %>%
     population
   )
 
+
+# pull out Davies et all transmission parameters
+age_data_davies <- read_csv(
+  "data/susceptibility_clinical_fraction_age_Davies.csv",
+  col_types = cols(
+    age_group = col_character(),
+    rel_susceptibility_mean = col_double(),
+    rel_susceptibility_median = col_double(),
+    clinical_fraction_mean = col_double(),
+    clinical_fraction_median = col_double()
+  )
+)
+
 # compute marginals of household transmission parameters and recombine, as a way
 # of factoring out household-specific mixing effects (like higher-risk
 # inter-couple, parent-child, grandparent-child contact). Want to weight over
@@ -507,6 +547,36 @@ initial <- stable_age / sum(stable_age)
 # calculate the stable solutions in the face of vaccination
 rt_solutions <- greta.dynamics::iterate_matrix(ngm, initial_state = initial)
 stable_age_distribution <- rt_solutions$stable_distribution
+rt <- rt_solutions$lambda
+
+# do the same for pre-vaccination to get R0 for Delta
+r0_solutions <- greta.dynamics::iterate_matrix(
+  ngm_pre_pandemic,
+  initial_state = initial
+)
+r0 <- r0_solutions$lambda
+
+
+# define the likelihood for Rt
+
+# Calibrate against Rt for England during this period - from UK modelling consensus estimate:
+# https://www.gov.uk/guidance/the-r-value-and-growth-rate#history
+# assuming the interval roughly corresponds to 95% CIs, and using 0.9-1.1 as the mean
+# 24 September 0.8 to 1.0
+# 17 September 0.9 to 1.1
+# 10 September 0.9 to 1.1
+# 3 September 0.9 to 1.1
+Rt_mean <- 1
+Rt_interval <- c(0.9, 1.1)
+Rt_sd <- mean(abs(Rt_mean - Rt_interval)) / qnorm(0.995, 0, 1)
+distribution(Rt_mean) <- normal(rt, sd = Rt_sd, truncation = c(0, Inf))
+
+# use a fairly wide estimate for Delta R0 (95% interval 7.5-8.5)
+R0_mean <- 8
+R0_interval <- c(7.5, 8.5)
+R0_sd <- mean(abs(R0_mean - R0_interval)) / qnorm(0.995, 0, 1)
+distribution(R0_mean) <- normal(r0, sd = R0_sd, truncation = c(0, Inf))
+
 
 # get index to aggregate stable state and match age distribution of infections
 ons_index <- get_ons_age_group_lookup() %>%

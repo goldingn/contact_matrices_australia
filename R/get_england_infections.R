@@ -14,7 +14,7 @@ get_england_infections <- function() {
   
   # data from October 1 report corresponds to September 22
   england_prevalence <- read_excel(
-    "data/covid19infectionsurveydatasets20211001england.xlsx",
+    "data/covid19infectionsurveydatasets20211015england.xlsx",
     sheet = "1g",
     skip = 4,
     n_max = 7

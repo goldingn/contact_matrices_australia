@@ -512,11 +512,11 @@ parameters <- list(
   
   # a microdistancing effect to reduce non-household contact rates - reflecting
   # voluntary measures to reduce non-household transmission probabilities
-  microdistancing = variable(lower = 0, upper = 1)
+  microdistancing = variable(lower = 0, upper = 1),
   
   # a correction factor for the effect of vaccination, since VE estimates are
   # uncertain and UK has lots of prior immunity
-  # vaccine_effect_scaling = normal(1, 0.1, truncation = c(0, 1))
+  vaccine_effect_scaling = normal(1, 0.1, truncation = c(0, 1))
   
 )
 
@@ -635,7 +635,7 @@ setting_ngms <- mapply(
   SIMPLIFY = FALSE
 )
 
-vaccine_effect <- vaccine_effect_raw #  * parameters$vaccine_effect_scaling
+vaccine_effect <- vaccine_effect_raw * parameters$vaccine_effect_scaling
 
 # and create NGMs with of vaccination, mobility, and microdistancing
 setting_ngms_study_period <- list(
@@ -681,11 +681,11 @@ Rt_interval <- c(0.9, 1.1)
 Rt_sd <- mean(abs(Rt_mean - Rt_interval)) / qnorm(0.995, 0, 1)
 distribution(Rt_mean) <- normal(rt, sd = Rt_sd, truncation = c(0, Inf))
 
-# use a fairly wide estimate for Delta R0 (95% interval 7.5-8.5)
-R0_mean <- 8
-R0_interval <- c(7.5, 8.5)
+# use a fairly wide estimate for Delta R0 (6-8)
+R0_mean <- 7
+R0_interval <- c(5.5, 8.5)
 R0_sd <- mean(abs(R0_mean - R0_interval)) / qnorm(0.995, 0, 1)
-# distribution(R0_mean) <- normal(r0, sd = R0_sd, truncation = c(0, Inf))
+distribution(R0_mean) <- normal(r0, sd = R0_sd, truncation = c(0, Inf))
 
 
 # get index to aggregate stable state and match age distribution of infections
@@ -766,8 +766,8 @@ attach(parameters)
 m <- model(
   home_scaling,
   non_household_scaling,
-  microdistancing
-  # vaccine_effect_scaling
+  microdistancing,
+  vaccine_effect_scaling
 )
 
 draws <- mcmc(
@@ -782,12 +782,54 @@ draws <- mcmc(
 coda::gelman.diag(draws, autoburnin = FALSE, multivariate = FALSE)
 bayesplot::mcmc_trace(draws)
 
-# calculate susceptibility
+# summarise susceptibility trend posterior
+susceptibility_posterior_sims <- calculate(susceptibility, values = draws, nsim = 3000)[[1]][, , 1]
 
-susceptibility_posterior_mean <- colMeans(calculate(susceptibility, values = draws, nsim = 3000)[[1]][, , 1])
+susceptibility_posterior_mean <- colMeans(susceptibility_posterior_sims)
+susceptibility_posterior_intervals <- apply(susceptibility_posterior_sims,
+                                           2,
+                                           quantile,
+                                           c(0.025, 0.975))
 
-plot(susceptibility_posterior_mean, ylim = c(0, max(c(prior_susceptibility, susceptibility_posterior_mean))))
-lines(prior_susceptibility)
+par(mfrow = c(1, 1),
+    mar = c(5, 4, 4, 2) + 0.1)
+# plot the susceptibility curve
+plot(
+  x = age_lower,
+  y = susceptibility_posterior_mean,
+  type = "n",
+  lwd = 2,
+  ylim = c(0, 1),
+  xlab = "age",
+  ylab = "relative susceptibility",
+  main = "Updated estimates of relative susceptibility by age\nBlack solid line: new mean; grey region: new 95% CI;\ndashed line: Davies et al. estimate"
+)
+polygon(
+  x = c(seq_along(susceptibility_posterior_mean),
+        rev(seq_along(susceptibility_posterior_mean))),
+  y = c(susceptibility_posterior_intervals[1, ],
+        rev(susceptibility_posterior_intervals[2, ])),
+  col = grey(0.8),
+  lty = 0
+)
+lines(
+  susceptibility_posterior_intervals[1, ],
+  col = grey(0.4)
+)
+lines(
+  susceptibility_posterior_intervals[2, ],
+  col = grey(0.4)
+)
+lines(
+  prior_susceptibility,
+  lty = 2
+)
+lines(
+  susceptibility_posterior_mean,
+  lwd = 2,
+  lend = 2
+)
+
 
 # get posterior means of parameters
 estimates <- do.call(
@@ -799,21 +841,42 @@ estimates <- do.call(
     )
   )
 ) %>%
-  lapply(mean)
+  lapply(mean) %>%
+  c(
+    list(
+      susceptibility = susceptibility_posterior_mean
+    )    
+  )
 
-# and compute stable age distribution based on the posterior mean
-stable_age_post_grouped_sims <- calculate(
+
+
+
+  
+# and compute stable age distribution based on the posterior means
+stable_age_post_grouped <- calculate(
   stable_age_distribution_grouped,
-  values = draws,
-  nsim = 3000
-)[[1]]
+  values = estimates
+)[[1]][, 1]
 
-stable_age_post_grouped <- colMeans(stable_age_post_grouped_sims[, , 1])
+# and based on posterior means for other parameters, but Davies susceptibility
+# assumptions
+estimates_davies <- estimates
+estimates_davies$susceptibility <- prior_susceptibility
+stable_age_davies_grouped <- calculate(
+  stable_age_distribution_grouped,
+  values = estimates_davies
+)[[1]][, 1]
+
 
 # compare outputs
-par(mfrow = c(2, 1), mar = c(3, 4, 2, 1))
+par(mfrow = c(3, 1), mar = c(3, 4, 2, 1))
+barplot(stable_age_davies_grouped,
+        main = "England Davies susceptibility",
+        xlab = "case ages",
+        ylab = "fraction of infections",
+        names.arg = england_infections$age_group)
 barplot(stable_age_post_grouped,
-        main = "England modelled",
+        main = "England new susceptibility estimate",
         xlab = "case ages",
         ylab = "fraction of infections",
         names.arg = england_infections$age_group)
@@ -823,7 +886,7 @@ barplot(england_infections$infections / 1000,
         ylab = "'000s of infections",
         names.arg = england_infections$age_group)
 
-# check the reproduction number estimate matches England estimates
+# check the other parameters are vaguely reasonable
 plot(
   calculate(
     r0,
@@ -836,18 +899,18 @@ plot(
   )
 )
 
-# estimated_calibration_stats <- calculate(
-#   r0,
-#   rt,
-#   hSAR,
-#   sSAR,
-#   wSAR,
-#   oSAR,
-#   values = estimates
-# ) %>%
-#   lapply(c)
-# 
-# estimated_calibration_stats
+estimated_calibration_stats <- calculate(
+  r0,
+  rt,
+  hSAR,
+  sSAR,
+  wSAR,
+  oSAR,
+  values = estimates
+) %>%
+  lapply(c)
+
+estimated_calibration_stats
 
 
 dput(

@@ -433,21 +433,22 @@ davies_estimates <- read_csv(
 )
 age_effect_smooths_davies <- davies_estimates %>%
   mutate(
-    age_midpoint = case_when(
-      age_group == "0_9" ~ 5,
-      age_group == "10_19" ~ 15,
-      age_group == "20_29" ~ 25,
-      age_group == "30_39" ~ 35,
-      age_group == "40_49" ~ 45,
-      age_group == "50_59" ~ 55,
-      age_group == "60_69" ~ 65,
-      age_group == "70+" ~ 75,
-    )
+    age_lower = readr::parse_number(age_group),
+    age_upper = age_lower + 9,
+  ) %>%
+  group_by(age_group) %>%
+  summarise(
+    age = age_lower:age_upper,
+    across(
+      ends_with("mean"),
+      first
+    ),
+    .groups = "drop"
   ) %>%
   summarise(
     across(
       ends_with("mean"),
-      ~list(smooth.spline(age_midpoint, .x, df = 6))
+      ~list(smooth.spline(age, .x, df = 10))
     )
   ) %>%
   as.list() %>%
@@ -840,7 +841,7 @@ plot(
   ylim = c(0, 1),
   xlab = "age",
   ylab = "relative susceptibility",
-  main = "Updated estimates of relative susceptibility by age\nNew estimate (black line: mean, grey region: 95% CI);\nOriginal estimate (dotted line binned, dashed line smoothed)"
+  main = "Updated estimates of relative susceptibility by age\nNew estimate (black line: mean, grey region: 95% CI);\nOriginal estimate (dotted/dashed lines)"
 )
 
 lines(

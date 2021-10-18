@@ -420,8 +420,8 @@ pop_vec <- england_population %>%
   )
 
 
-# pull out Davies et all transmission parameters
-age_effect_smooths_davies <- read_csv(
+# pull out Davies et al transmission parameters
+davies_estimates <- read_csv(
   "data/susceptibility_clinical_fraction_age_Davies.csv",
   col_types = cols(
     age_group = col_character(),
@@ -430,7 +430,8 @@ age_effect_smooths_davies <- read_csv(
     clinical_fraction_mean = col_double(),
     clinical_fraction_median = col_double()
   )
-) %>%
+)
+age_effect_smooths_davies <- davies_estimates %>%
   mutate(
     age_midpoint = case_when(
       age_group == "0_9" ~ 5,
@@ -446,7 +447,7 @@ age_effect_smooths_davies <- read_csv(
   summarise(
     across(
       ends_with("mean"),
-      ~list(smooth.spline(age_midpoint, .x, df = 4))
+      ~list(smooth.spline(age_midpoint, .x, df = 6))
     )
   ) %>%
   as.list() %>%
@@ -481,23 +482,23 @@ davies_trends <- age_lookup %>%
     age_group
   )
 
-# davies_trends %>%
-#   pivot_longer(
-#     cols = -age_group,
-#     names_to = "parameter",
-#     values_to = "value"
-#   ) %>%
-#   ggplot(
-#     aes(
-#       x = age_group,
-#       y = value,
-#       fill = parameter
-#     )
-#   ) +
-#   geom_col(
-#     position = "dodge"
-#   ) +
-#   theme_minimal()
+davies_trends %>%
+  pivot_longer(
+    cols = -age_group,
+    names_to = "parameter",
+    values_to = "value"
+  ) %>%
+  ggplot(
+    aes(
+      x = age_group,
+      y = value,
+      fill = parameter
+    )
+  ) +
+  geom_col(
+    position = "dodge"
+  ) +
+  theme_minimal()
 
 # start fitting the model
 library(greta.dynamics)
@@ -522,11 +523,14 @@ parameters <- list(
 
 # re-estimate susceptibility for younger ages in a manner similar to Davies.
 # Note that due to high levels (and uncertain effects) of vaccination on the
-# older age groups, reestimation of the whole curve is not possible fro these
+# older age groups, re-estimation of the whole curve is not possible from these
 # data, but they will provide details information on the younger age groups
 
 prior_susceptibility <- davies_trends$rel_susceptibility
 cutoff_age <- 16
+
+# minimum age in the UK data
+min_age <- 2
 
 # get the integer ages for age groups
 age_lower <- age_lookup %>%
@@ -546,21 +550,35 @@ age_lower <- age_lookup %>%
   arrange(age_group) %>%
   pull(age_lower)
 
+age_weight <- tibble(
+  age = age_lower
+) %>%
+  mutate(
+    weight = pmin(cutoff_age, age),
+    weight = weight - min(weight),
+    weight = weight / max(weight),
+    weight = 1 - weight
+  ) %>%
+  pull(weight)
+
 # make susceptibility a monotone increasing function for the younger ages,
 # matching the Davies estimates at the cutoff value
 
 # define a GP for the vector of younger ages, and transform it to monotone
 # decreasing starting at 1, the transform it to monotone decreasing converging
 # on the cutoff
-n <- sum(age_lower < cutoff_age)
+ages_to_infer <- age_lower < cutoff_age & age_lower >= min_age
+
+n <- sum(ages_to_infer)
 
 x <- seq(0, 1, length.out = n)
-n_inducing <- 5
-x_inducing <- seq(0, 1, length.out = n_inducing)
-variance <- normal(0, 10, truncation = c(0, Inf))
+variance <- normal(0, 0.5, truncation = c(0, Inf))
 lengthscale <- lognormal(-2, 1)
 kernel <- rbf(lengthscales = lengthscale, variance = variance)
-gp_logit_diff <- gp(x = x, kernel = kernel, inducing = x_inducing)
+gp_logit_diff <- gp(x = x, kernel = kernel)
+
+
+gp_logit_diff_centred <- gp_logit_diff + rev(qlogis(prior_susceptibility[1:n]))
 
 # get the susceptibility at the cutoff
 susceptibility_young_max <- prior_susceptibility[age_lookup$age == cutoff_age]
@@ -568,34 +586,42 @@ susceptibility_young_max <- prior_susceptibility[age_lookup$age == cutoff_age]
 # get convert the GP to integer year differences in susceptibility relative ot
 # the Davies cutoff, in reverse
 gp_diffs_rev <- c(
-  zeros(length(prior_susceptibility) - n),
-  ilogit(gp_logit_diff)
+  zeros(length(prior_susceptibility) - n - min_age),
+  ilogit(gp_logit_diff_centred)
 )
 
-# reverse and scale to increase to 1 at the cuttof, then stay at 1 thereafter
-gp_increasing <- 1 - rev(cumsum(gp_diffs_rev)) / n
+terminal <- uniform(0, 1)
+
+# reverse and scale to increase to 1 at the cutoff, then stay at 1 thereafter
+# gp_increasing <- 1 - rev(cumsum(gp_diffs_rev)) / n
+gp_increasing <- 1 - terminal * rev(cumsum(gp_diffs_rev)) / sum(gp_diffs_rev)
+
+# extend to repeat the final value for ages below the minimum age
+gp_increasing_extended <- c(rep(gp_increasing[1], min_age), gp_increasing)
+
 
 # multiply by a clamped version of the Davies susceptibility estimates, set to a
 # constant value below the cutoff, to obtain a function increasing
 # monotonically to converge at the cutoff
 prior_susceptibility_clamped <- prior_susceptibility
 prior_susceptibility_clamped[age_lower < cutoff_age] <- susceptibility_young_max
-susceptibility <- gp_increasing * prior_susceptibility_clamped
+susceptibility <- gp_increasing_extended * prior_susceptibility_clamped
 
-# susceptibility_prior_sims <- calculate(susceptibility, nsim = 30)[[1]][, , 1]
-# plot(
-#   susceptibility_prior_sims[1, ],
-#   type = "n",
-#   ylim = c(0, 1)
-#   # ylim = range(susceptibility_prior_sims)
-# )
-# for (i in 1:30) {
-#   lines(
-#     susceptibility_prior_sims[i, ],
-#     col = grey(0.4)
-#   )
-# }
-# lines(prior_susceptibility, lwd = 3)
+susceptibility_prior_sims <- calculate(susceptibility, nsim = 30)[[1]][, , 1]
+par(mfrow = c(1, 1))
+plot(
+  susceptibility_prior_sims[1, ] ~ age_lower,
+  type = "n",
+  ylim = c(0, 1)
+  # ylim = range(susceptibility_prior_sims)
+)
+for (i in 1:30) {
+  lines(
+    susceptibility_prior_sims[i, ] ~ age_lower,
+    col = grey(0.4)
+  )
+}
+  lines(prior_susceptibility ~ age_lower, lwd = 3)
 
 asymptomatic_relative_infectiousness <- 0.5
 
@@ -681,13 +707,6 @@ Rt_interval <- c(0.9, 1.1)
 Rt_sd <- mean(abs(Rt_mean - Rt_interval)) / qnorm(0.995, 0, 1)
 distribution(Rt_mean) <- normal(rt, sd = Rt_sd, truncation = c(0, Inf))
 
-# use a fairly wide estimate for Delta R0 (6-8)
-R0_mean <- 7
-R0_interval <- c(5.5, 8.5)
-R0_sd <- mean(abs(R0_mean - R0_interval)) / qnorm(0.995, 0, 1)
-distribution(R0_mean) <- normal(r0, sd = R0_sd, truncation = c(0, Inf))
-
-
 # get index to aggregate stable state and match age distribution of infections
 ons_index <- get_ons_age_group_lookup() %>%
   filter(
@@ -708,7 +727,7 @@ stable_age_distribution_grouped_unscaled <- tapply(
 
 stable_age_distribution_grouped <- stable_age_distribution_grouped_unscaled / sum(stable_age_distribution_grouped_unscaled)
 
-# relevel infections to prevent it from overwhelming the likelihood
+# relevel infections to prevent it from overwhelming the likelihood (not really as many datapoints as the whole population)
 infections <- round(england_infections$infections * 1000 / sum(england_infections$infections))
 
 counts <- as_data(t(infections))
@@ -731,7 +750,7 @@ hSAR <- mean_attack_rate(
 hSAR_interval <- c(0.2, 0.35)
 hSAR_mean <- mean(hSAR_interval)
 hSAR_sd <- mean(abs(hSAR_mean - hSAR_interval)) / qnorm(0.975, 0, 1)
-# distribution(hSAR_mean) <- normal(hSAR, hSAR_sd, truncation = c(0, 1))
+distribution(hSAR_mean) <- normal(hSAR, hSAR_sd, truncation = c(0, 1))
 
 # add likelihoods for reasonable SARs in school, work and other (assuming lower
 # than home)
@@ -791,8 +810,27 @@ susceptibility_posterior_intervals <- apply(susceptibility_posterior_sims,
                                            quantile,
                                            c(0.025, 0.975))
 
-par(mfrow = c(1, 1),
-    mar = c(5, 4, 4, 2) + 0.1)
+davies_step_data <- davies_estimates %>%
+  mutate(
+    age_lower = readr::parse_number(age_group),
+    age_upper = age_lower + 10
+  ) %>%
+  rowwise() %>%
+  summarise(
+    age = age_lower:age_upper,
+    susceptibility = first(rel_susceptibility_mean)
+  )
+
+png("outputs/rel_susceptibility.png",
+    width = 1200,
+    height = 1000,
+    pointsize = 30)
+
+par(
+  mfrow = c(1, 1),
+  mar = c(5, 4, 4, 2) + 0.1,
+  las = 1
+)
 # plot the susceptibility curve
 plot(
   x = age_lower,
@@ -802,8 +840,15 @@ plot(
   ylim = c(0, 1),
   xlab = "age",
   ylab = "relative susceptibility",
-  main = "Updated estimates of relative susceptibility by age\nBlack solid line: new mean; grey region: new 95% CI;\ndashed line: Davies et al. estimate"
+  main = "Updated estimates of relative susceptibility by age\nNew estimate (black line: mean, grey region: 95% CI);\nOriginal estimate (dotted line binned, dashed line smoothed)"
 )
+
+lines(
+  susceptibility ~ age,
+  data = davies_step_data,
+  lty = 3
+)
+
 polygon(
   x = c(seq_along(susceptibility_posterior_mean),
         rev(seq_along(susceptibility_posterior_mean))),
@@ -830,6 +875,8 @@ lines(
   lend = 2
 )
 
+dev.off()
+
 
 # get posterior means of parameters
 estimates <- do.call(
@@ -848,6 +895,7 @@ estimates <- do.call(
     )    
   )
 
+
 # and compute stable age distribution based on the posterior means
 stable_age_post_grouped <- calculate(
   stable_age_distribution_grouped,
@@ -856,31 +904,50 @@ stable_age_post_grouped <- calculate(
 
 # and based on posterior means for other parameters, but Davies susceptibility
 # assumptions
+step_susceptibility <- davies_step_data %>%
+  group_by(
+    age
+  ) %>%
+  summarise(
+    across(
+      susceptibility,
+      last
+    )
+  ) %>%
+  pull(susceptibility)
+
 estimates_davies <- estimates
-estimates_davies$susceptibility <- prior_susceptibility
+estimates_davies$susceptibility <- step_susceptibility
 stable_age_davies_grouped <- calculate(
   stable_age_distribution_grouped,
   values = estimates_davies
 )[[1]][, 1]
 
-
+png(
+  "outputs/age_distribution.png",
+  width = 1000,
+  height = 1300,
+  pointsize = 30
+)
 # compare outputs
 par(mfrow = c(3, 1), mar = c(3, 4, 2, 1))
 barplot(stable_age_davies_grouped,
-        main = "England Davies susceptibility",
+        main = "Original susceptibility estimate",
         xlab = "case ages",
         ylab = "fraction of infections",
         names.arg = england_infections$age_group)
 barplot(stable_age_post_grouped,
-        main = "England new susceptibility estimate",
+        main = "New susceptibility estimate",
         xlab = "case ages",
         ylab = "fraction of infections",
         names.arg = england_infections$age_group)
 barplot(england_infections$infections / 1000,
-        main = "England observed",
+        main = "Infections observed in England",
         xlab = "case ages",
         ylab = "'000s of infections",
         names.arg = england_infections$age_group)
+
+dev.off()
 
 # check the other parameters are vaguely reasonable
 plot(

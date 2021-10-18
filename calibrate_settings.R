@@ -526,7 +526,7 @@ parameters <- list(
 # data, but they awill provide details information on the younger age groups
 
 prior_susceptibility <- davies_trends$rel_susceptibility
-cutoff_age <- 24
+cutoff_age <- 16
 
 # get the integer ages for age groups
 age_lower <- age_lookup %>%
@@ -579,7 +579,7 @@ gp_increasing <- 1 - rev(cumsum(gp_diffs_rev)) / n
 # constant value below the cutoff, to obtain a function increasing
 # mmonotonically to converge at the cutoff
 prior_susceptibility_clamped <- prior_susceptibility
-prior_susceptibility_clamped[age_weight > 0] <- susceptibility_young_max
+prior_susceptibility_clamped[age_lower < cutoff_age] <- susceptibility_young_max
 susceptibility <- gp_increasing * prior_susceptibility_clamped
 
 # susceptibility_prior_sims <- calculate(susceptibility, nsim = 30)[[1]][, , 1]
@@ -685,7 +685,7 @@ distribution(Rt_mean) <- normal(rt, sd = Rt_sd, truncation = c(0, Inf))
 R0_mean <- 8
 R0_interval <- c(7.5, 8.5)
 R0_sd <- mean(abs(R0_mean - R0_interval)) / qnorm(0.995, 0, 1)
-distribution(R0_mean) <- normal(r0, sd = R0_sd, truncation = c(0, Inf))
+# distribution(R0_mean) <- normal(r0, sd = R0_sd, truncation = c(0, Inf))
 
 
 # get index to aggregate stable state and match age distribution of infections
@@ -731,7 +731,7 @@ hSAR <- mean_attack_rate(
 hSAR_interval <- c(0.2, 0.35)
 hSAR_mean <- mean(hSAR_interval)
 hSAR_sd <- mean(abs(hSAR_mean - hSAR_interval)) / qnorm(0.975, 0, 1)
-distribution(hSAR_mean) <- normal(hSAR, hSAR_sd, truncation = c(0, 1))
+# distribution(hSAR_mean) <- normal(hSAR, hSAR_sd, truncation = c(0, 1))
 
 # add likelihoods for reasonable SARs in school, work and other (assuming lower
 # than home)
@@ -757,9 +757,9 @@ SAR_interval <- c(0, 0.1)
 SAR_mean <- mean(SAR_interval)
 SAR_sd <- mean(abs(SAR_mean - SAR_interval)) / qnorm(0.975, 0, 1)
 
-distribution(SAR_mean) <- normal(sSAR, SAR_sd, truncation = c(0, 1))
-distribution(SAR_mean) <- normal(wSAR, SAR_sd, truncation = c(0, 1))
-distribution(SAR_mean) <- normal(oSAR, SAR_sd, truncation = c(0, 1))
+# distribution(SAR_mean) <- normal(sSAR, SAR_sd, truncation = c(0, 1))
+# distribution(SAR_mean) <- normal(wSAR, SAR_sd, truncation = c(0, 1))
+# distribution(SAR_mean) <- normal(oSAR, SAR_sd, truncation = c(0, 1))
 
 # fit the model by HMC
 attach(parameters)
@@ -836,18 +836,18 @@ plot(
   )
 )
 
-estimated_calibration_stats <- calculate(
-  r0,
-  rt,
-  hSAR,
-  sSAR,
-  wSAR,
-  oSAR,
-  values = estimates
-) %>%
-  lapply(c)
-
-estimated_calibration_stats
+# estimated_calibration_stats <- calculate(
+#   r0,
+#   rt,
+#   hSAR,
+#   sSAR,
+#   wSAR,
+#   oSAR,
+#   values = estimates
+# ) %>%
+#   lapply(c)
+# 
+# estimated_calibration_stats
 
 
 dput(

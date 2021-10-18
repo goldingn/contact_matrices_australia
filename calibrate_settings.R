@@ -431,6 +431,7 @@ davies_estimates <- read_csv(
     clinical_fraction_median = col_double()
   )
 )
+
 age_effect_smooths_davies <- davies_estimates %>%
   mutate(
     age_lower = readr::parse_number(age_group),
@@ -800,6 +801,7 @@ draws <- mcmc(
 
 # check sampling
 coda::gelman.diag(draws, autoburnin = FALSE, multivariate = FALSE)
+coda::effectiveSize(draws)
 bayesplot::mcmc_trace(draws)
 
 # summarise susceptibility trend posterior
@@ -851,27 +853,27 @@ lines(
 )
 
 polygon(
-  x = c(seq_along(susceptibility_posterior_mean),
-        rev(seq_along(susceptibility_posterior_mean))),
+  x = c(age_lower,
+        rev(age_lower)),
   y = c(susceptibility_posterior_intervals[1, ],
         rev(susceptibility_posterior_intervals[2, ])),
   col = grey(0.8),
   lty = 0
 )
 lines(
-  susceptibility_posterior_intervals[1, ],
+  susceptibility_posterior_intervals[1, ] ~ age_lower,
   col = grey(0.4)
 )
 lines(
-  susceptibility_posterior_intervals[2, ],
+  susceptibility_posterior_intervals[2, ] ~ age_lower,
   col = grey(0.4)
 )
 lines(
-  prior_susceptibility,
+  prior_susceptibility ~ age_lower,
   lty = 2
 )
 lines(
-  susceptibility_posterior_mean,
+  susceptibility_posterior_mean ~ age_lower,
   lwd = 2,
   lend = 2
 )
@@ -985,3 +987,35 @@ dput(
     other = estimates$non_household_scaling
   )
 )
+
+
+# combine the clinical fraction and age estimates
+daves_smoothed_extended <- davies_trends %>%
+  bind_cols(
+    davies_updated = susceptibility_posterior_mean
+  ) %>%
+  rename(
+    davies_original = rel_susceptibility
+  ) %>%
+  mutate(
+    age_lower = readr::parse_number(as.character(age_group)),
+    age_upper = case_when(
+      age_lower == 80 ~ 100,
+      TRUE ~ age_lower
+    )
+  ) %>%
+  rowwise() %>%
+  summarise(
+    age = age_lower:age_upper,
+    across(
+      c(clinical_fraction,
+        davies_original,
+        davies_updated),
+      first
+    )
+  )
+
+datapasta::dpasta(daves_smoothed_extended)
+
+
+

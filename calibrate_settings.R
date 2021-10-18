@@ -9,14 +9,15 @@
 # roll forward to most recent UK infection age distribution data (includes spike
 # in 12-15s) - DONE
 
-# ditch Eyre, and infer susceptibility profile as a GP with Davies estiamtee as
-# a prior mean
+# still learn household/non-household weights - DONE
 
-# still learn household/non-household weights
+# use smoothed Davies estimates for susceptibility and clinical fraction - DONE
 
 # try learning the scaling on asymptomatic onwards transmission
 
-# use smoothed Davies estimates for susceptibility and clinical fraction
+# ditch Eyre, and infer susceptibility profile as a GP with Davies estimate as
+# a prior mean
+
 
 # define model age limits (integer years from 2-85, as per prevalence data extents)
 age_breaks <- c(seq(0, 80, by = 1), Inf)
@@ -420,7 +421,7 @@ pop_vec <- england_population %>%
 
 
 # pull out Davies et all transmission parameters
-age_data_davies <- read_csv(
+age_effect_smooths_davies <- read_csv(
   "data/susceptibility_clinical_fraction_age_Davies.csv",
   col_types = cols(
     age_group = col_character(),
@@ -429,56 +430,91 @@ age_data_davies <- read_csv(
     clinical_fraction_mean = col_double(),
     clinical_fraction_median = col_double()
   )
-)
-
-# compute marginals of household transmission parameters and recombine, as a way
-# of factoring out household-specific mixing effects (like higher-risk
-# inter-couple, parent-child, grandparent-child contact). Want to weight over
-# the most commonly observed age pairs (to downwieight areas computed from
-# little data), but without the age data, we have toi assume this is
-# proportional to the contact rate estimates
-
-home_contacts <- conmat::matrix_to_predictions(setting_contact_matrices$home)
-household_transmissions <- conmat::matrix_to_predictions(transmission_matrices$household)
-home_contact_transmissions <- home_contacts %>%
+) %>%
   mutate(
-    probability = household_transmissions$contacts
-  )
-
-relative_susceptibility <- home_contact_transmissions %>%
-  group_by(age_group_to) %>%
+    age_midpoint = case_when(
+      age_group == "0_9" ~ 5,
+      age_group == "10_19" ~ 15,
+      age_group == "20_29" ~ 25,
+      age_group == "30_39" ~ 35,
+      age_group == "40_49" ~ 45,
+      age_group == "50_59" ~ 55,
+      age_group == "60_69" ~ 65,
+      age_group == "70+" ~ 75,
+    )
+  ) %>%
   summarise(
-    probability = weighted.mean(probability, contacts),
-    .groups = "drop"
+    across(
+      ends_with("mean"),
+      ~list(smooth.spline(age_midpoint, .x, df = 4))
+    )
+  ) %>%
+  as.list() %>%
+  lapply(pluck, 1)
+
+# convert to integer ages
+davies_trends <- age_lookup %>%
+  mutate(
+    age_extrapolate = pmin(age, 80),
+    clinical_fraction = predict(age_effect_smooths_davies$clinical_fraction_mean, age_extrapolate)$y,
+    rel_susceptibility = predict(age_effect_smooths_davies$rel_susceptibility_mean, age_extrapolate)$y
+  ) %>%
+  group_by(
+    age_group
+  ) %>%
+  summarise(
+    across(
+      c(clinical_fraction, rel_susceptibility),
+      mean
+    )
   ) %>%
   mutate(
-    probability = probability / max(probability)
-  )
-
-
-relative_infectiousness <- home_contact_transmissions %>%
-  group_by(age_group_from) %>%
-  summarise(
-    probability = weighted.mean(probability, contacts),
-    .groups = "drop"
+    age_group = factor(
+      age_group,
+      levels = str_sort(
+        unique(age_group),
+        numeric = TRUE
+      )
+    )
   ) %>%
-  mutate(
-    probability = probability / max(probability)
+  arrange(
+    age_group
   )
+
+# davies_trends %>%
+#   pivot_longer(
+#     cols = -age_group,
+#     names_to = "parameter",
+#     values_to = "value"
+#   ) %>%
+#   ggplot(
+#     aes(
+#       x = age_group,
+#       y = value,
+#       fill = parameter 
+#     )
+#   ) +
+#   geom_col() +
+#   theme_minimal()
+
+
+aysmptomatic_relative_infectiousness <- 0.5
+
+relative_infectiousness <- davies_trends$clinical_fraction + (1 - davies_trends$clinical_fraction) * aysmptomatic_relative_infectiousness
 
 relative_transmission_matrix <- outer(
-  relative_infectiousness$probability,
-  relative_susceptibility$probability,
+  relative_infectiousness,
+  davies_trends$rel_susceptibility,
   FUN = "*"
 )
 
 # choose baseline transmission probability matrices and ensure they are in the
 # correct order
 setting_transmission_matrices <- list(
-  home = transmission_matrices$household,
-  school = transmission_matrices$work_education,
-  work = transmission_matrices$work_education,
-  other = transmission_matrices$work_education
+  home = relative_transmission_matrix,
+  school = relative_transmission_matrix,
+  work = relative_transmission_matrix,
+  other = relative_transmission_matrix
 )[setting_order]
 
 

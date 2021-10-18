@@ -520,35 +520,19 @@ parameters <- list(
   
 )
 
-cutoff_age <- 24
-# estimate Gaussian process on susceptibility - want it constrained between 0 and 1, with Davies as the mean
+# re-estimate susceptibility for younger ages in a manner similar to Davies.
+# Note that due to high levels (and uncertain effects) of vaccination on the
+# older age groups, reestimation of the whole curve is not possible fro these
+# data, but they awill provide details information on the younger age groups
 
-# GP on log-power of susceptibility
 prior_susceptibility <- davies_trends$rel_susceptibility
-x <- seq(0, 1, length.out = length(prior_susceptibility))
-n_inducing <- 7
-x_inducing <- seq(min(x), cutoff_age / max(age_lookup$age), length.out = n_inducing)
-variance <- 0.5 #normal(0, 0.5, truncation = c(0, Inf))
-lengthscale <- 0.1
-kernel <- rbf(lengthscales = lengthscale, variance = variance)
-gp_log_ratio <- gp(x = x, kernel = kernel, inducing = x_inducing)
+cutoff_age <- 24
 
-# only want this to apply to the younger age group, since older age group
-# subject to vaccination (and VE unknown)?
-
-# lineat interpolation between under-17s and over 40s
-age_weight <- age_lookup %>%
-  mutate(
-    weight = pmin(age, cutoff_age),
-    weight = weight - min(weight),
-    weight = weight / max(weight),
-    weight = 1 - weight
-  ) %>%
-  group_by(
-    age_group
-  ) %>%
+# get the integer ages for age groups
+age_lower <- age_lookup %>%
+  group_by(age_group) %>%
   summarise(
-    weight = mean(weight)
+    age_lower = min(age)
   ) %>%
   mutate(
     age_group = factor(
@@ -559,27 +543,44 @@ age_weight <- age_lookup %>%
       )
     )
   ) %>%
-  arrange(
-    age_group
-  ) %>%
-  pull(weight)
+  arrange(age_group) %>%
+  pull(age_lower)
 
-# make susceptibility a monotone increasing function for the younger ages
+# make susceptibility a monotone increasing function for the younger ages,
+# matching the Davies estimates at the cutoff value
 
-# make monotone increasing to 1, then multiply buy weight and commbine with older pattern
+# define a GP for the vector of younger ages, and transform it to monotone
+# decreasing starting at 1, the transform it to monotone decreasing converging
+# on the cutoff
+n <- sum(age_lower < cutoff_age)
 
-# get the maximum susceptibility for younger age group
+x <- seq(0, 1, length.out = n)
+n_inducing <- 5
+x_inducing <- seq(0, 1, length.out = n_inducing)
+variance <- 10 #normal(0, 0.5, truncation = c(0, Inf))
+lengthscale <- 0.1
+kernel <- rbf(lengthscales = lengthscale, variance = variance)
+gp_logit_diff <- gp(x = x, kernel = kernel, inducing = x_inducing)
+
+# get the susceptibility at the cutoff
 susceptibility_young_max <- prior_susceptibility[age_lookup$age == cutoff_age]
-# susceptibility_young <- gp_log_ratio * age_weight + susceptibility_young_max
 
-# susceptibility_young <- exp(gp_log_ratio * age_weight) * susceptibility_young_max
-susceptibility_young <- exp(gp_log_ratio * age_weight) * prior_susceptibility  #_max
+# get convert the GP to integer year differences in susceptibility relative ot
+# the Davies cutoff, in reverse
+gp_diffs_rev <- c(
+  zeros(length(prior_susceptibility) - n),
+  ilogit(gp_logit_diff)
+)
 
-# interpolate between the two
-susceptibility <- susceptibility_young * age_weight + prior_susceptibility * (1 - age_weight)
+# reverse and scale to increase to 1 at the cuttofm, then stay at 1
+gp_increasing <- 1 - rev(cumsum(gp_diffs_rev)) / n
 
-# susceptibility_ratio <- exp(gp_log_ratio * age_weight)
-# susceptibility <- prior_susceptibility * susceptibility_ratio
+# multiply by a clamped version of the Davies susceptibility estimates, set to a
+# constant value below the cutoff, to obtain a function increasing
+# mmonotonically to converge at the cutoff
+prior_susceptibility_clamped <- prior_susceptibility
+prior_susceptibility_clamped[age_weight > 0] <- susceptibility_young_max
+susceptibility <- gp_increasing * prior_susceptibility_clamped
 
 # susceptibility_prior_sims <- calculate(susceptibility, nsim = 30)[[1]][, , 1]
 # plot(

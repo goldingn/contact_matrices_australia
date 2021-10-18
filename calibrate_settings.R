@@ -523,7 +523,7 @@ parameters <- list(
 # re-estimate susceptibility for younger ages in a manner similar to Davies.
 # Note that due to high levels (and uncertain effects) of vaccination on the
 # older age groups, reestimation of the whole curve is not possible fro these
-# data, but they awill provide details information on the younger age groups
+# data, but they will provide details information on the younger age groups
 
 prior_susceptibility <- davies_trends$rel_susceptibility
 cutoff_age <- 16
@@ -557,8 +557,8 @@ n <- sum(age_lower < cutoff_age)
 x <- seq(0, 1, length.out = n)
 n_inducing <- 5
 x_inducing <- seq(0, 1, length.out = n_inducing)
-variance <- 10 #normal(0, 0.5, truncation = c(0, Inf))
-lengthscale <- 0.1
+variance <- normal(0, 10, truncation = c(0, Inf))
+lengthscale <- lognormal(-2, 1)
 kernel <- rbf(lengthscales = lengthscale, variance = variance)
 gp_logit_diff <- gp(x = x, kernel = kernel, inducing = x_inducing)
 
@@ -572,12 +572,12 @@ gp_diffs_rev <- c(
   ilogit(gp_logit_diff)
 )
 
-# reverse and scale to increase to 1 at the cuttofm, then stay at 1
+# reverse and scale to increase to 1 at the cuttof, then stay at 1 thereafter
 gp_increasing <- 1 - rev(cumsum(gp_diffs_rev)) / n
 
 # multiply by a clamped version of the Davies susceptibility estimates, set to a
 # constant value below the cutoff, to obtain a function increasing
-# mmonotonically to converge at the cutoff
+# monotonically to converge at the cutoff
 prior_susceptibility_clamped <- prior_susceptibility
 prior_susceptibility_clamped[age_lower < cutoff_age] <- susceptibility_young_max
 susceptibility <- gp_increasing * prior_susceptibility_clamped
@@ -848,10 +848,6 @@ estimates <- do.call(
     )    
   )
 
-
-
-
-  
 # and compute stable age distribution based on the posterior means
 stable_age_post_grouped <- calculate(
   stable_age_distribution_grouped,

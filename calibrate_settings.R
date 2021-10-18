@@ -48,8 +48,8 @@ efficacy <- list(
 # Use coverage data from immediately before comencement of 12-15 vacciantion
 # program. This is a pragmatic decision because UK does not yet report 12-15
 # vaccination coverage separately from 16-17 year olds in a machine-readable
-# format. Unlike 12-15 year olds, 16-17 year olds have been elibigile for a long
-# period and have ikely considerably higher coverage. Whilst this incorrectly
+# format. Unlike 12-15 year olds, 16-17 year olds have been eligible for a long
+# period and have likely considerably higher coverage. Whilst this incorrectly
 # assumes no vaccine protection of 12-15 year olds. However coverage of this age
 # group as at October 15 was low (https://www.bbc.com/news/health-55274833),
 # first dose only, and given the lag to immunity will likely have minimal effect
@@ -491,20 +491,118 @@ davies_trends <- age_lookup %>%
 #     aes(
 #       x = age_group,
 #       y = value,
-#       fill = parameter 
+#       fill = parameter
 #     )
 #   ) +
-#   geom_col() +
+#   geom_col(
+#     position = "dodge"
+#   ) +
 #   theme_minimal()
 
+# start fitting the model
+library(greta.dynamics)
+library(greta.gp)
 
-aysmptomatic_relative_infectiousness <- 0.5
+# all parameters
+parameters <- list(
+  
+  # scaling parameters for transmission probabilities
+  home_scaling = variable(lower = 0),
+  non_household_scaling = variable(lower = 0),
+  
+  # a microdistancing effect to reduce non-household contact rates - reflecting
+  # voluntary measures to reduce non-household transmission probabilities
+  microdistancing = variable(lower = 0, upper = 1)
+  
+  # a correction factor for the effect of vaccination, since VE estimates are
+  # uncertain and UK has lots of prior immunity
+  # vaccine_effect_scaling = normal(1, 0.1, truncation = c(0, 1))
+  
+)
 
-relative_infectiousness <- davies_trends$clinical_fraction + (1 - davies_trends$clinical_fraction) * aysmptomatic_relative_infectiousness
+cutoff_age <- 24
+# estimate Gaussian process on susceptibility - want it constrained between 0 and 1, with Davies as the mean
 
-relative_transmission_matrix <- outer(
-  relative_infectiousness,
-  davies_trends$rel_susceptibility,
+# GP on log-power of susceptibility
+prior_susceptibility <- davies_trends$rel_susceptibility
+x <- seq(0, 1, length.out = length(prior_susceptibility))
+n_inducing <- 7
+x_inducing <- seq(min(x), cutoff_age / max(age_lookup$age), length.out = n_inducing)
+variance <- 0.5 #normal(0, 0.5, truncation = c(0, Inf))
+lengthscale <- 0.1
+kernel <- rbf(lengthscales = lengthscale, variance = variance)
+gp_log_ratio <- gp(x = x, kernel = kernel, inducing = x_inducing)
+
+# only want this to apply to the younger age group, since older age group
+# subject to vaccination (and VE unknown)?
+
+# lineat interpolation between under-17s and over 40s
+age_weight <- age_lookup %>%
+  mutate(
+    weight = pmin(age, cutoff_age),
+    weight = weight - min(weight),
+    weight = weight / max(weight),
+    weight = 1 - weight
+  ) %>%
+  group_by(
+    age_group
+  ) %>%
+  summarise(
+    weight = mean(weight)
+  ) %>%
+  mutate(
+    age_group = factor(
+      age_group,
+      levels = str_sort(
+        unique(age_group),
+        numeric = TRUE
+      )
+    )
+  ) %>%
+  arrange(
+    age_group
+  ) %>%
+  pull(weight)
+
+# make susceptibility a monotone increasing function for the younger ages
+
+# make monotone increasing to 1, then multiply buy weight and commbine with older pattern
+
+# get the maximum susceptibility for younger age group
+susceptibility_young_max <- prior_susceptibility[age_lookup$age == cutoff_age]
+# susceptibility_young <- gp_log_ratio * age_weight + susceptibility_young_max
+
+# susceptibility_young <- exp(gp_log_ratio * age_weight) * susceptibility_young_max
+susceptibility_young <- exp(gp_log_ratio * age_weight) * prior_susceptibility  #_max
+
+# interpolate between the two
+susceptibility <- susceptibility_young * age_weight + prior_susceptibility * (1 - age_weight)
+
+# susceptibility_ratio <- exp(gp_log_ratio * age_weight)
+# susceptibility <- prior_susceptibility * susceptibility_ratio
+
+# susceptibility_prior_sims <- calculate(susceptibility, nsim = 30)[[1]][, , 1]
+# plot(
+#   susceptibility_prior_sims[1, ],
+#   type = "n",
+#   ylim = c(0, 1)
+#   # ylim = range(susceptibility_prior_sims)
+# )
+# for (i in 1:30) {
+#   lines(
+#     susceptibility_prior_sims[i, ],
+#     col = grey(0.4)
+#   )
+# }
+# lines(prior_susceptibility, lwd = 3)
+
+asymptomatic_relative_infectiousness <- 0.5
+
+relative_infectiousness <- davies_trends$clinical_fraction + (1 - davies_trends$clinical_fraction) * asymptomatic_relative_infectiousness
+
+relative_transmission_matrix <- kronecker(
+  as_data(relative_infectiousness),
+  t(susceptibility),
   FUN = "*"
 )
 
@@ -516,27 +614,6 @@ setting_transmission_matrices <- list(
   work = relative_transmission_matrix,
   other = relative_transmission_matrix
 )[setting_order]
-
-
-# start fitting the model
-library(greta.dynamics)
-
-# all parameters
-parameters <- list(
-  
-  # scaling parameters for transmission probabilities
-  home_scaling = variable(lower = 0),
-  non_household_scaling = variable(lower = 0),
-  
-  # a microdistancing effect to reduce non-household contact rates - reflecting
-  # voluntary measures to reduce non-household transmission probabilities
-  microdistancing = variable(lower = 0, upper = 1),
-  
-  # a correction factor for the effect of vaccination, since VE estimates are
-  # uncertain and UK has lots of prior immunity
-  vaccine_effect_scaling = normal(1, 0.1, truncation = c(0, 1))
-  
-)
 
 # scale each of the transmission probability matrices
 # home is scaled binimially as contacts saturate
@@ -557,7 +634,7 @@ setting_ngms <- mapply(
   SIMPLIFY = FALSE
 )
 
-vaccine_effect <- vaccine_effect_raw * parameters$vaccine_effect_scaling
+vaccine_effect <- vaccine_effect_raw #  * parameters$vaccine_effect_scaling
 
 # and create NGMs with of vaccination, mobility, and microdistancing
 setting_ngms_study_period <- list(
@@ -575,29 +652,25 @@ ngm_pre_pandemic <- Reduce("+", setting_ngms)
 # apply vaccination effects and non-household distancing effects
 ngm <- Reduce("+", setting_ngms_study_period)
 
-# use better initial age distribution for faster sampling
-ngm_unscaled  <- Reduce("+", setting_contact_matrices) * setting_transmission_matrices$home * vaccine_effect_raw
-stable_age <- Re(eigen(ngm_unscaled)$vectors[, 1])
-initial <- stable_age / sum(stable_age)
-
 # calculate the stable solutions in the face of vaccination
-rt_solutions <- greta.dynamics::iterate_matrix(ngm, initial_state = initial)
+rt_solutions <- greta.dynamics::iterate_matrix(ngm)
 stable_age_distribution <- rt_solutions$stable_distribution
 rt <- rt_solutions$lambda
 
 # do the same for pre-vaccination to get R0 for Delta
 r0_solutions <- greta.dynamics::iterate_matrix(
-  ngm_pre_pandemic,
-  initial_state = initial
+  ngm_pre_pandemic
 )
 r0 <- r0_solutions$lambda
-
 
 # define the likelihood for Rt
 
 # Calibrate against Rt for England during this period - from UK modelling consensus estimate:
 # https://www.gov.uk/guidance/the-r-value-and-growth-rate#history
 # assuming the interval roughly corresponds to 95% CIs, and using 0.9-1.1 as the mean
+# 15 October 0.9 to 1.1
+# 8 October 0.9 to 1.1
+# 1 October 0.8 to 1.1
 # 24 September 0.8 to 1.0
 # 17 September 0.9 to 1.1
 # 10 September 0.9 to 1.1
@@ -692,20 +765,28 @@ attach(parameters)
 m <- model(
   home_scaling,
   non_household_scaling,
-  microdistancing,
-  vaccine_effect_scaling
+  microdistancing
+  # vaccine_effect_scaling
 )
 
 draws <- mcmc(
   m,
   chains = 10,
   warmup = 500,
-  n_samples = 300
+  n_samples = 300,
+  one_by_one = TRUE
 )
 
 # check sampling
 coda::gelman.diag(draws, autoburnin = FALSE, multivariate = FALSE)
 bayesplot::mcmc_trace(draws)
+
+# calculate susceptibility
+
+susceptibility_posterior_mean <- colMeans(calculate(susceptibility, values = draws, nsim = 3000)[[1]][, , 1])
+
+plot(susceptibility_posterior_mean, ylim = c(0, max(c(prior_susceptibility, susceptibility_posterior_mean))))
+lines(prior_susceptibility)
 
 # get posterior means of parameters
 estimates <- do.call(
@@ -720,10 +801,13 @@ estimates <- do.call(
   lapply(mean)
 
 # and compute stable age distribution based on the posterior mean
-stable_age_post_grouped <- calculate(
+stable_age_post_grouped_sims <- calculate(
   stable_age_distribution_grouped,
-  values = estimates
-)[[1]][, 1]
+  values = draws,
+  nsim = 3000
+)[[1]]
+
+stable_age_post_grouped <- colMeans(stable_age_post_grouped_sims[, , 1])
 
 # compare outputs
 par(mfrow = c(2, 1), mar = c(3, 4, 2, 1))
@@ -732,15 +816,17 @@ barplot(stable_age_post_grouped,
         xlab = "case ages",
         ylab = "fraction of infections",
         names.arg = england_infections$age_group)
-barplot(infections,
+barplot(england_infections$infections / 1000,
         main = "England observed",
         xlab = "case ages",
-        ylab = "number of infections",
+        ylab = "'000s of infections",
         names.arg = england_infections$age_group)
 
 # check the reproduction number estimate matches England estimates
 plot(
   calculate(
+    r0,
+    rt,
     hSAR,
     sSAR,
     wSAR,
@@ -750,6 +836,8 @@ plot(
 )
 
 estimated_calibration_stats <- calculate(
+  r0,
+  rt,
   hSAR,
   sSAR,
   wSAR,

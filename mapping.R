@@ -252,7 +252,8 @@ tp_reduction %>%
   scale_fill_viridis_c(
     begin = 0.1,
     end = 1,
-    option = "C"
+    option = "C",
+    direction = -1
   ) +
   geom_sf(
     data = metro %>%
@@ -338,7 +339,7 @@ wfh_lga_summary %>%
   scale_fill_viridis_c(
     begin = 0.1,
     end = 1,
-    option = "C"
+    option = "D"
   ) +
   geom_sf(
     data = metro %>%
@@ -380,7 +381,7 @@ wfh_lga_summary %>%
   scale_fill_viridis_c(
     begin = 0.1,
     end = 1,
-    option = "C"
+    option = "D"
   ) +
   geom_sf(
     data = metro %>%
@@ -477,7 +478,8 @@ tp_reduction %>%
   scale_fill_viridis_c(
     begin = 0.1,
     end = 1,
-    option = "C"
+    option = "C",
+    direction = -1
   ) +
   geom_sf(
     data = metro %>%
@@ -563,7 +565,7 @@ wfh_lga_summary %>%
   scale_fill_viridis_c(
     begin = 0.1,
     end = 1,
-    option = "C"
+    option = "D"
   ) +
   geom_sf(
     data = metro %>%
@@ -605,7 +607,7 @@ wfh_lga_summary %>%
   scale_fill_viridis_c(
     begin = 0.1,
     end = 1,
-    option = "C"
+    option = "D"
   ) +
   geom_sf(
     data = metro %>%

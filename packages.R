@@ -21,3 +21,5 @@ library(RColorBrewer)
 library(png)
 library(fields)
 #library(furrr)
+
+# install.packages("conmat", repos = "https://njtierney.r-universe.dev")

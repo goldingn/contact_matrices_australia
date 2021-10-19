@@ -11,12 +11,16 @@ get_state_ngms_unscaled <- function(model, age_breaks) {
 
   # return a list of unscaled NGMs for Australian states, accounting for
   # population age distributions and household sizes
+  transmission_matrices <- get_setting_transmission_matrices(
+    age_breaks = age_breaks
+  )
+  
   tibble(
     state = unique(abs_pop_age_lga_2020$state)
   ) %>%
     rowwise() %>%
     mutate(
-      household_size = get_mean_household_size(
+      per_capita_household_size = get_per_capita_household_size(
         state = state
       ),
       population = list(
@@ -26,24 +30,19 @@ get_state_ngms_unscaled <- function(model, age_breaks) {
         predict_setting_contacts(
           contact_model = model,
           population = abs_age_state(state),
+          per_capita_household_size = per_capita_household_size,
           age_breaks = age_breaks
         )
       )
     ) %>%
     mutate(
-      setting_matrices = list(
-        adjust_household_contact_matrix(
-          setting_matrices = setting_matrices,
-          household_size = household_size,
-          population = population
-        )
-      ),
-      contact_matrix = list(
-        pluck(setting_matrices, "all")
+      contact_matrices = list(
+        setting_matrices[c("home", "school", "work", "other")]
       ),
       ngm_unscaled = list(
-        apply_age_contribution(
-          contact_matrix
+        all = get_unscaled_ngm(
+          contact_matrices = contact_matrices,
+          transmission_matrices = transmission_matrices
         )
       )
     ) %>%

@@ -273,19 +273,19 @@ state_ngms_unscaled <- get_state_ngms_unscaled(
 transmission_matrices <- get_setting_transmission_matrices(
   age_breaks = age_limits_5y
 )
+names(transmission_matrices)
 
 base_matrices <- c("home", "school", "work", "other")
 
-
 remote_nt_ngm_unscaled <- get_unscaled_ngm(
   contact_matrices = remote_matrix_updated[base_matrices],
-  transmission_matrices = transmission_matrices
+  transmission_matrices = transmission_matrices[base_matrices]
 )
 
 
 urban_nt_ngm_unscaled <- get_unscaled_ngm(
   contact_matrices = urban_matrix_updated[base_matrices],
-  transmission_matrices = transmission_matrices
+  transmission_matrices = transmission_matrices[base_matrices]
 )
 
 optimal_ttiq_baseline <- 2.93

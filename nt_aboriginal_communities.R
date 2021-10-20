@@ -579,3 +579,28 @@ for (ttiq_plot in c("partial", "optimal")) {
   )
   
 }
+
+non_household_settings <- c("work", "school", "other")
+list(
+  urban = c(
+    urban_matrix_updated,
+    list(
+      non_household = Reduce(
+        "+",
+        urban_matrix_updated[non_household_settings]
+      )
+    )
+  ),
+  remote = c(
+    remote_matrix_updated,
+    list(
+      non_household = Reduce(
+        "+",
+        remote_matrix_updated[non_household_settings]
+      )
+    )
+  )
+) %>%
+saveRDS(
+  file = "outputs/nt_first_nations_contact_matrices.RDS"
+)

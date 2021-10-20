@@ -65,7 +65,7 @@ metro <- gcc2021 %>%
 metro_area <- lga2018 %>%
   filter(
     apply(
-      X = st_intersects(., metro, sparse = FALSE),
+      X = st_intersects(., st_as_sf(metro), sparse = FALSE),
       MARGIN = 1,
       FUN = any
     )
@@ -74,9 +74,13 @@ metro_area <- lga2018 %>%
     lga_area = st_area(.) %>% as.numeric
   )
 
+metro_lgas <- metro_area %>%
+  as.data.frame %>%
+  select(lga_name_2018, state_name_2016) %>%
+  as_tibble
 
 # calculate area of intersection of LGAs intersecting with metropolitain areas
-intersection_area <- st_intersection(lga2018, metro) %>%
+intersection_area <- st_intersection(lga2018, st_as_sf(metro)) %>%
   mutate(
     intersection_area = st_area(.) %>% as.numeric
   ) %>%
@@ -94,6 +98,21 @@ metro_lgas <- metro_area %>%
     pc_metro = intersection_area/lga_area * 100
   ) %>% tibble
 
+
+
+metro_lga_list <- abs_lga_lookup %>%
+  right_join(
+    metro_lgas %>%
+      filter(pc_metro > 5),
+    by = c("lga" = "lga_name_2018")
+  ) %>%
+  select(state, lga)
+
+
+saveRDS(
+  object = metro_lga_list,
+  file = "outputs/metro_lga_list.RDS"
+)
 
 # check if sensible to include in metro and adjust filter based on % metro
 

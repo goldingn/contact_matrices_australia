@@ -74,11 +74,11 @@ vino_household_matrix_broad <- function(remote = TRUE) {
       .groups = "drop"
     ) %>%
     pivot_wider(
-      names_from = age_to,
+      names_from = age_from,
       values_from = count
     ) %>%
     tibble::column_to_rownames(
-      "age_from"
+      "age_to"
     ) %>%
     as.matrix()
   

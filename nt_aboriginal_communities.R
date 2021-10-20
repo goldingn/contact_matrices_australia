@@ -337,26 +337,13 @@ nt_remote_aboriginal_pop_fun <- get_nt_remote_aboriginal_pop() %>%
 nt_urban_aboriginal_pop_fun <- get_nt_urban_aboriginal_pop() %>%
   get_age_population_function()
 
-fraction_eligible_lookup <- tibble(
-  age = 0:100
-) %>%
-  mutate(
-    age_band_5y = cut(age, age_limits_5y, right = FALSE),
-    population = australia_pop_fun(age),
-    eligible = age >= 12
-  ) %>%
-  group_by(age_band_5y) %>%
-  summarise(
-    fraction_eligible = sum(population * eligible) / sum(population),
-    .groups = "drop"
-  )
-    
+
 vaccination_effects <- expand_grid(
   vacc_coverage = seq(0.5, 1, by = 0.1),
-  age_band_5y = unique(fraction_eligible_lookup$age_band_5y)
+  age_band_5y = fraction_eligible_lookup()$age_band_5y
 ) %>%
   left_join(
-    fraction_eligible_lookup,
+    fraction_eligible_lookup(),
     by = c("age_band_5y")
   ) %>%
   # add on average efficacy on transmission, given an assumed AZ/Pfizer mix, based on age groups

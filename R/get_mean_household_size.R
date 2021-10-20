@@ -45,6 +45,16 @@ get_mean_household_size <- function(state = NULL, lga = NULL) {
       n_people = n_households * size,
     )
   
+  # dodgy fix for outdated LGA names in NSW from 2016 census data
+  library(dplyr)
+  lga <- case_when(
+    lga == "Bayside (A)" ~ "Botany Bay (C)",
+      lga == "Cootamundra-Gundagai Regional (A)" ~ "Gundagai (A)",
+      lga == "Nambucca Valley (A)" ~ "Nambucca (A)",
+      lga == "Dubbo Regional (A)" ~ "Western Plains Regional (A)",
+      TRUE ~ lga
+    )
+  
   state <- enquo(state)
   lga <- enquo(lga)
   

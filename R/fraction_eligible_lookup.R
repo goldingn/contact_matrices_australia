@@ -7,7 +7,8 @@
 #' @return
 #' @author geryan
 #' @export
-fraction_eligible_lookup <- function() {
+#' @param eligible_age
+fraction_eligible_lookup <- function(eligible_age = 12) {
 
   # table of fraction of each age class eligible for vaccination
   
@@ -29,7 +30,7 @@ fraction_eligible_lookup <- function() {
     mutate(
       age_band_5y = cut(age, age_limits_5y, right = FALSE),
       population = australia_pop_fun(age),
-      eligible = age >= 12
+      eligible = age >= eligible_age
     ) %>%
     group_by(age_band_5y) %>%
     summarise(

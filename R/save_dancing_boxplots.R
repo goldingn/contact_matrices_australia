@@ -7,6 +7,12 @@
 #' @param label
 #' @param dir
 #' @param type
+#' @param width
+#' @param height
+#' @param dpi
+#' @param units
+#' @param vacc_from
+#' @param fade
 #' @return
 #' @author geryan
 #' @export
@@ -18,14 +24,20 @@ save_dancing_boxplots <- function(
   width = 200,
   height = 150,
   dpi = 300,
-  units = "mm"
+  units = "mm",
+  vacc_from = "twelve",
+  fade = FALSE,
+  wfh = FALSE
 ) {
 
   for (ttiq_plot in c("partial", "optimal")) {
     
     dancing_boxplot(
       df = df,
-      ttiq_plot = ttiq_plot
+      ttiq_plot = ttiq_plot,
+      vacc_from = vacc_from,
+      fade = fade,
+      wfh = wfh
     )
     
     ggsave(

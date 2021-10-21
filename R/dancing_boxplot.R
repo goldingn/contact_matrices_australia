@@ -5,16 +5,35 @@
 #' @title National-plan-style boxplot (AKA Golding Plot)
 #' @param df
 #' @param ttiq
+#' @param vacc_from
+#' @param fade
+#' @param wfh
 #' @return
 #' @author geryan
 #' @export
-dancing_boxplot <- function(df, ttiq_plot) {
+dancing_boxplot <- function(
+  df,
+  ttiq_plot,
+  vacc_from = NA_character_,
+  fade = FALSE,
+  wfh = FALSE
+) {
+  
+  if(is.na(vacc_from)){
+    vacc_from <- ""
+  } else {
+    vacc_from <- sprintf(
+      "from\nage %s",
+      vacc_from
+    )
+  }
   
   colours <- RColorBrewer::brewer.pal(4, "Set2")
   
   baseline_colour <- washout(colours[2], 0.8)
   vaccine_colours <- washout(colours[3], c(0.7, 0.65, 0.5, 0.35, 0.2, 0.1))
   
+  fade_colours <- washout(colours[1], c(0.05, 0.1, 0.25, 0.45, 0.7))
   
   border_colour <- grey(0.6)
   r0_colour <- grey(0.5)
@@ -62,7 +81,11 @@ dancing_boxplot <- function(df, ttiq_plot) {
       top = tp_baseline,
       bottom = tp_coverage_0.5,
       box_colour = vaccine_colours[1],
-      text_main = "50%\nvaccination\ncoverage",
+      text_main = paste0(
+        "50%\nvaccination\ncoverage",
+        "\n",
+        vacc_from
+      ),
       only_scenarios = first_scenario
     ) %>%
     add_stacked_box(
@@ -112,6 +135,57 @@ dancing_boxplot <- function(df, ttiq_plot) {
         colour = grey(0.1)
       )
     )
+  
+  if(fade){
+    p <- p %>%
+      add_stacked_box(
+        top = tp_coverage_0.8,
+        bottom = tp_coverage_0.8*0.95,
+        reference = tp_baseline_vacc,
+        box_colour = fade_colours[1],
+        border_colour = fade_colours[1]
+      ) %>%
+      add_stacked_box(
+        top = tp_coverage_0.8*0.95,
+        bottom = tp_coverage_0.8*0.9,
+        reference = tp_baseline_vacc,
+        box_colour = fade_colours[2],
+        border_colour = fade_colours[2]
+      ) %>%
+      add_stacked_box(
+        top = tp_coverage_0.8*0.9,
+        bottom = tp_coverage_0.8*0.85,
+        reference = tp_baseline_vacc,
+        box_colour = fade_colours[3],
+        border_colour = fade_colours[3]
+      ) %>%
+      add_stacked_box(
+        top = tp_coverage_0.8*0.85,
+        bottom = tp_coverage_0.8*0.8,
+        reference = tp_baseline_vacc,
+        box_colour = fade_colours[4],
+        border_colour = fade_colours[4]
+      )%>%
+      add_stacked_box(
+        top = tp_coverage_0.8*0.8,
+        bottom = tp_coverage_0.8*0.75,
+        reference = tp_baseline_vacc,
+        box_colour = fade_colours[5],
+        border_colour = fade_colours[5]
+      )
+  }
+  
+  if(wfh){
+    p <- p %>%
+      add_stacked_box(
+        top = tp_coverage_0.8,
+        bottom = tp_coverage_wfh,
+        reference = tp_baseline_vacc,
+        text_main = "Additional WFH",
+        only_scenarios = first_scenario,
+        box_colour = fade_colours[1]
+      )
+  }
   
   p
 

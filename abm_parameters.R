@@ -38,15 +38,14 @@ australia_setting_contact_matrices_5y <- predict_setting_contacts(
 
 # get the setting-specific contact matrices
 setting_transmission_matrices_5y <- get_setting_transmission_matrices(
-  age_breaks = age_breaks
+  age_breaks = age_breaks,
+  asymptomatic_relative_infectiousness = 1
 )
 
-# reweight the setting transmission matrices to be relative to the maximum value
-# max_transmission_prob <- max(vapply(setting_transmission_matrices_5y, max, FUN.VALUE = numeric(1)))
-# relative_setting_transmission_matrices_5y <- lapply(setting_transmission_matrices_5y, "/", max_transmission_prob)
+# get marginals for overall probabilities.
+# compute effective contact matrix for non-household only
 
 relative_setting_transmission_matrices_5y <- setting_transmission_matrices_5y
-
 settings <- names(relative_setting_transmission_matrices_5y)
 
 # setting specific unscaled NGMs
@@ -66,20 +65,14 @@ australia_contact_matrix_5y <- Reduce("+", australia_setting_contact_matrices_5y
 # get ratio of these to get all-setting transmission probabilities
 australia_transmission_matrix_5y <- australia_ngm_5y / australia_contact_matrix_5y
 
-
-
 # make the marginals relative to the max, make the overall transmission effect
 # relative to the max, and the divide one by the other to get the multiplicative
 # remainder (to multiply onto the effective contact matrix)
-
-
-
 
 # compute (contact-weighted) marginals of the average transmission probabilities
 # by integer age.
 
 # compute average transmission surfaces, based on the overall mean number of contacts in each setting
-# age-specific contact-weighted means break up the modelled structure of the surface?
 setting_mean_contacts <- vapply(australia_setting_contact_matrices_5y[settings],
                                 mean,
                                 FUN.VALUE = numeric(1)) 
@@ -135,21 +128,21 @@ relative_age_contribution <- relative_infectiousness %>%
     by = "age_group"
   )
 
-# relative_age_contribution %>%
-#   pivot_longer(
-#     cols = starts_with("relative"),
-#     names_to = "parameter",
-#     values_to = "ratio"
-#   ) %>%
-#   ggplot(
-#     aes(
-#       x = age_group,
-#       y = ratio,
-#       color = parameter
-#     )
-#   ) +
-#   geom_point() +
-#   theme_minimal()
+relative_age_contribution %>%
+  pivot_longer(
+    cols = starts_with("relative"),
+    names_to = "parameter",
+    values_to = "ratio"
+  ) %>%
+  ggplot(
+    aes(
+      x = age_group,
+      y = ratio,
+      color = parameter
+    )
+  ) +
+  geom_point() +
+  theme_minimal()
 
 # matrix of just the marginal effects
 relative_transmission_matrix <- outer(
@@ -182,6 +175,39 @@ australia_effective_contact_matrix_5y <- australia_contact_matrix_5y * interacti
 ratio <- mean(australia_contact_matrix_5y) / mean(australia_effective_contact_matrix_5y)
 australia_effective_contact_matrix_5y <- australia_effective_contact_matrix_5y * ratio
 
+# now compute the interaction effect for non-household specifically
+nonhousehold_settings <- settings[-1]
+non_household_ngm <- Reduce("+", australia_setting_ngms_5y[nonhousehold_settings])
+
+# overall contacts
+nonhousehold_contact_matrix <- Reduce("+", australia_setting_contact_matrices_5y[nonhousehold_settings])
+
+# get ratio of these to get all-setting transmission probabilities
+nonhousehold_transmission_matrix <- non_household_ngm / nonhousehold_contact_matrix
+
+# get interaction part for non-household settings, assuming overall transmission probabilities
+nonhousehold_interaction_transmission_matrix <- nonhousehold_transmission_matrix / relative_transmission_matrix
+
+plot_matrix(nonhousehold_interaction_transmission_matrix)
+
+# check this
+max(
+  abs(
+    nonhousehold_transmission_matrix - relative_transmission_matrix * nonhousehold_interaction_transmission_matrix
+  )
+) < 1e-6
+
+
+# effective contacts for Eamon - incorporating age-interaction effects from the transmission probabilities that are not included in the marginals
+nonhousehold_effective_contact_matrix <- nonhousehold_contact_matrix * nonhousehold_interaction_transmission_matrix
+
+# adjust so that the mean is the same as for the basic contacts one (the
+# probability gets rescaled relative to this, but the number of contacts might
+# affect the degree of dispersion?)
+nonhousehold_ratio <- mean(nonhousehold_contact_matrix) / mean(nonhousehold_effective_contact_matrix)
+nonhousehold_effective_contact_matrix <- nonhousehold_effective_contact_matrix * nonhousehold_ratio
+
+
 # save these things for Eamon
 australia_effective_contact_matrix_5y %>%
   as_tibble() %>%
@@ -191,6 +217,16 @@ australia_effective_contact_matrix_5y %>%
   ) %>%
   write_csv(
     "outputs/effective_contact_matrix_for_eamon.csv"
+  )
+
+nonhousehold_effective_contact_matrix %>%
+  as_tibble() %>%
+  mutate(
+    age_group_from = rownames(australia_effective_contact_matrix_5y),
+    .before = everything()
+  ) %>%
+  write_csv(
+    "outputs/nonhousehold_effective_contact_matrix_for_eamon.csv"
   )
 
 relative_age_contribution %>%
@@ -231,7 +267,7 @@ setting_transmission_probabilities_for_bec <- bind_rows(
 write_csv(setting_transmission_probabilities_for_bec,
           file = "outputs/setting_transmission_probabilities_for_bec.csv")
   
-nt_first_nations_contact_matrices <- readRDS("nt_first_nations_contact_matrices_updated.RDS")
+nt_first_nations_contact_matrices <- readRDS("outputs/nt_first_nations_contact_matrices.RDS")
 dir.create("outputs/bec_contact_matrices", showWarnings = FALSE)
 for (population in names(nt_first_nations_contact_matrices)) {
   
@@ -386,7 +422,8 @@ write_csv(
 # get setting-specific contact matrices for the same age breaks, convert into a
 # dataframe, and save
 setting_tranmission_list_1y <- get_setting_transmission_matrices(
-  age_breaks = age_breaks_1y
+  age_breaks = age_breaks_1y,
+  asymptomatic_relative_infectiousness = 1
 ) %>%
   lapply(
     matrix_to_predictions

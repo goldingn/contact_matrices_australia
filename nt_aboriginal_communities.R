@@ -273,19 +273,19 @@ state_ngms_unscaled <- get_state_ngms_unscaled(
 transmission_matrices <- get_setting_transmission_matrices(
   age_breaks = age_limits_5y
 )
+names(transmission_matrices)
 
 base_matrices <- c("home", "school", "work", "other")
 
-
 remote_nt_ngm_unscaled <- get_unscaled_ngm(
   contact_matrices = remote_matrix_updated[base_matrices],
-  transmission_matrices = transmission_matrices
+  transmission_matrices = transmission_matrices[base_matrices]
 )
 
 
 urban_nt_ngm_unscaled <- get_unscaled_ngm(
   contact_matrices = urban_matrix_updated[base_matrices],
-  transmission_matrices = transmission_matrices
+  transmission_matrices = transmission_matrices[base_matrices]
 )
 
 optimal_ttiq_baseline <- 2.93
@@ -578,6 +578,7 @@ aboriginal_tp_partial_5y <- vaccination_effects_5y %>%
       )
     )
   )
+<<<<<<< HEAD
 
 aboriginal_tp_optimal_5y <- aboriginal_tp_partial_5y %>%
   mutate(
@@ -615,3 +616,32 @@ save_dancing_boxplots(
   fade = TRUE
 )
 
+=======
+  
+}
+
+non_household_settings <- c("work", "school", "other")
+list(
+  urban = c(
+    urban_matrix_updated,
+    list(
+      non_household = Reduce(
+        "+",
+        urban_matrix_updated[non_household_settings]
+      )
+    )
+  ),
+  remote = c(
+    remote_matrix_updated,
+    list(
+      non_household = Reduce(
+        "+",
+        remote_matrix_updated[non_household_settings]
+      )
+    )
+  )
+) %>%
+saveRDS(
+  file = "outputs/nt_first_nations_contact_matrices.RDS"
+)
+>>>>>>> a40de00d9b14211078ad10112e3052d6c3d032a0

@@ -79,6 +79,8 @@ metro_lgas <- metro_area %>%
   select(lga_name_2018, state_name_2016) %>%
   as_tibble
 
+# saveRDS(metro_lgas, file = "outputs/metro_lgas.RDS")
+
 # calculate area of intersection of LGAs intersecting with metropolitain areas
 intersection_area <- st_intersection(lga2018, st_as_sf(metro)) %>%
   mutate(
@@ -662,6 +664,7 @@ wfh_lga_summary <- wfh_lga  %>%
             wfh_var = Hmisc::wtd.var(SA2_WFH, weights = population / LGA_pop * ratio, normwt = TRUE),
             state = first(state))
 
+saveRDS(wfh_lga_summary, "outputs/wfh_lga_summary.RDS")
 
 wfh_index %>%
   left_join(

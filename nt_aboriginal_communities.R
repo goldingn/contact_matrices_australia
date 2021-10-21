@@ -466,116 +466,152 @@ aboriginal_tp <- readRDS(
 
 # 5. plot these a la national plan figure
 
-colours <- RColorBrewer::brewer.pal(3, "Set2")
 
-baseline_colour <- washout(colours[2], 0.8)
-vaccine_colours <- washout(colours[3], c(0.7, 0.65, 0.5, 0.35, 0.2, 0.1))
-
-border_colour <- grey(0.6)
-r0_colour <- grey(0.5)
-label_colour <- grey(0.3)
-text_size <- 2.5
-
-for (ttiq_plot in c("partial", "optimal")) {
-  
-  first_scenario <- levels(aboriginal_tp$scenario)[1]
+save_dancing_boxplots(
   aboriginal_tp %>%
-    filter(
-      ttiq == ttiq_plot
-    ) %>%
-    select(
-      -tp_percent_reduction
-    ) %>%
-    pivot_wider(
-      names_from = vacc_coverage,
-      values_from = post_vacc_tp,
-      names_prefix = "tp_coverage_"
-    ) %>%
-    control_base_plot() %>%
-    add_context_hline(
-      label = "Control",
-      at = 1,
-      linetype = 2,
-      text_size = text_size * 1.3
-    ) %>%
-    add_context_hline(
-      label = "Delta R0 (for Australia)",
-      at = 8,
-      linetype = 2,
-      text_size = text_size * 1.3
-    ) %>%
-    # add the vaccination + ttiq effect as a box
-    add_single_box(
-      top = r0,
-      bottom = tp_baseline,
-      box_colour = baseline_colour,
-      only_scenarios = first_scenario,
-      text_main = paste0(
-        "baseline\nPHSM\n&\n",
-        ttiq_plot,
-        "\nTTIQ"
-      )
-    ) %>%
-    add_single_box(
-      top = tp_baseline,
-      bottom = tp_coverage_0.5,
-      box_colour = vaccine_colours[1],
-      text_main = "50%\nvaccination\ncoverage",
-      only_scenarios = first_scenario
-    ) %>%
-    add_stacked_box(
-      top = tp_coverage_0.5,
-      bottom = tp_coverage_0.6,
-      reference = tp_baseline_vacc,
-      text_main = "60%",
-      only_scenarios = first_scenario,
-      box_colour = vaccine_colours[2]
-    ) %>%
-    add_stacked_box(
-      top = tp_coverage_0.6,
-      bottom = tp_coverage_0.7,
-      reference = tp_baseline_vacc,
-      text_main = "70%",
-      only_scenarios = first_scenario,
-      box_colour = vaccine_colours[3]
-    ) %>%
-    add_stacked_box(
-      top = tp_coverage_0.7,
-      bottom = tp_coverage_0.8,
-      reference = tp_baseline_vacc,
-      text_main = "80%",
-      only_scenarios = first_scenario,
-      box_colour = vaccine_colours[4]
-    ) %>%
-    add_stacked_box(
-      top = tp_coverage_0.8,
-      bottom = tp_coverage_0.9,
-      reference = tp_baseline_vacc,
-      text_main = "90%",
-      only_scenarios = first_scenario,
-      box_colour = vaccine_colours[5]
-    ) %>%
-    add_stacked_box(
-      top = tp_coverage_0.9,
-      bottom = tp_coverage_1,
-      reference = tp_baseline_vacc,
-      text_main = "100%",
-      only_scenarios = first_scenario,
-      box_colour = vaccine_colours[6]
-    ) %>%
-    add_arrow(8) +
-    theme(
-      axis.text.x = element_text(
-        size = 10,
-        colour = grey(0.1)
+    select(-tp_percent_reduction),
+  label = "aboriginal_tp_12y",
+  vacc_from = "twelve"
+)
+
+
+
+# 5 yo and up eligible
+
+
+vaccination_effects_5y <- expand_grid(
+  vacc_coverage = seq(0.5, 1, by = 0.1),
+  age_band_5y = fraction_eligible_lookup()$age_band_5y
+) %>%
+  left_join(
+    fraction_eligible_lookup(eligible_age = 5),
+    by = c("age_band_5y")
+  ) %>%
+  # add on average efficacy on transmission, given an assumed AZ/Pfizer mix, based on age groups
+  mutate(
+    proportion_vaccinated = vacc_coverage * fraction_eligible,
+    ve_susceptibility = ve("susceptibility", fraction_pfizer = 1, fraction_dose_2 = 1),
+    ve_onward = ve("onward", fraction_pfizer = 1, fraction_dose_2 = 1),
+    across(
+      starts_with("ve"),
+      .fns = list(multiplier = ~1 - proportion_vaccinated * .x)
+    )
+  )
+
+# apply vaccination
+aboriginal_tp_partial_5y <- vaccination_effects_5y %>%
+  # create vaccination effect matrix
+  group_by(vacc_coverage) %>%
+  summarise(
+    vaccination_effect_matrix = list(
+      outer(
+        ve_susceptibility_multiplier,
+        ve_onward_multiplier,
+        FUN = "*"
       )
     )
-  
-  ggsave(
-    sprintf("outputs/aboriginal_tp_figure_%s.png", ttiq_plot),
-    bg = "white",
-    width = 8,
-    height = 6
+  ) %>%
+  # add on different ngms
+  rowwise() %>%
+  mutate(
+    australia = list(australia_ngm),
+    nt = list(nt_ngm),
+    nt_remote_indigenous = list(remote_nt_ngm),
+    nt_urban_indigenous = list(urban_nt_ngm),
+    across(
+      -starts_with("vacc"),
+      .fns = list(
+        tp_reduction = ~ get_R(.x * vaccination_effect_matrix) / get_R(.x)
+      )
+    )
+  ) %>%
+  select(
+    vacc_coverage,
+    ends_with("tp_reduction")
+  ) %>%
+  pivot_longer(
+    ends_with("tp_reduction"),
+    names_to = "population_group",
+    values_to = "tp_multiplier"
+  ) %>%
+  mutate(
+    population_group = str_remove(population_group, "_tp_reduction"),
+    tp_percent_reduction = 100 * (1 - tp_multiplier)
+  ) %>%
+  arrange(
+    vacc_coverage,
+    population_group
+  ) %>%
+  mutate(
+    tp_baseline = case_when(
+      population_group == "australia" ~ get_R(australia_ngm),
+      population_group == "nt" ~ get_R(nt_ngm),
+      population_group == "nt_remote_indigenous" ~ get_R(remote_nt_ngm),
+      population_group == "nt_urban_indigenous" ~ get_R(urban_nt_ngm)
+    ),
+    .before = tp_multiplier
+  ) %>%
+  mutate(
+    r0 = 8 * tp_baseline / partial_ttiq_baseline,
+    .before = tp_baseline
+  ) %>%
+  mutate(
+    post_vacc_tp = tp_baseline * tp_multiplier
+  ) %>%
+  select(
+    -tp_multiplier
+  ) %>%
+  mutate(
+    scenario = case_when(
+      population_group == "australia" ~ "All\nAustralia",
+      population_group == "nt" ~ "All\nNT",
+      population_group == "nt_remote_indigenous" ~ "Remote\nIndigenous",
+      population_group == "nt_urban_indigenous" ~ "Urban\nIndigenous"
+    ),
+    scenario = factor(
+      scenario,
+      levels = c(
+        "All\nAustralia",
+        "All\nNT",
+        "Remote\nIndigenous",
+        "Urban\nIndigenous"
+      )
+    )
   )
-  
-}
+
+aboriginal_tp_optimal_5y <- aboriginal_tp_partial_5y %>%
+  mutate(
+    across(
+      c(tp_baseline, post_vacc_tp),
+      ~ . * optimal_ttiq_baseline / partial_ttiq_baseline
+    ),
+    tp_percent_reduction = 100 * (1 - post_vacc_tp / tp_baseline),
+  )
+
+aboriginal_tp_5y <- bind_rows(
+  optimal = aboriginal_tp_optimal_5y,
+  partial = aboriginal_tp_partial_5y,
+  .id = "ttiq"
+)
+
+
+
+# 5. plot these a la national plan figure
+
+
+
+save_dancing_boxplots(
+  aboriginal_tp_5y %>%
+    select(-tp_percent_reduction),
+  label = "aboriginal_tp_5y",
+  vacc_from = "five"
+)
+
+save_dancing_boxplots(
+  aboriginal_tp_5y %>%
+    select(-tp_percent_reduction),
+  label = "aboriginal_tp_5y_fade",
+  vacc_from = "five",
+  fade = TRUE
+)
+

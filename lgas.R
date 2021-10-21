@@ -13,7 +13,7 @@ model <- fit_setting_contacts(
 
 
 vaccination_effects <- expand_grid(
-  vacc_coverage = seq(0.5, 1, by = 0.1),
+  vacc_coverage = seq(0.5, 0.8, by = 0.1),
   age_band_5y = fraction_eligible_lookup()$age_band_5y
 ) %>%
   left_join(
@@ -145,10 +145,9 @@ aus_tp <- bind_rows(
 ## LGAs
 
 # # get lga names
-# abs_pop_age_lga_2020 %>%
-#   filter(state == "VIC") %>%
-#   distinct(lga) %>%
-#   pull(lga)
+lgas <- abs_pop_age_lga_2020 %>%
+  distinct(lga) %>%
+  pull(lga)
 
 # lgas we are interested in
 # lgas <- c(
@@ -186,6 +185,8 @@ aus_tp <- bind_rows(
 #   ) %>%
 #   dplyr::select(lga, decile)
 
+metro_lgas <- readRDS("outputs/metro_lgas.RDS")
+
 lgas <- metro_lgas %>%
   filter(
     state_name_2016 %in% c("New South Wales", "Victoria"),
@@ -198,7 +199,7 @@ lgas <- metro_lgas %>%
 
 
 transmission_matrices <- get_setting_transmission_matrices(
-  age_breaks = age_limits_5y
+  age_breaks = age_breaks_5y
 )
 
 lga_ngms_unscaled <- tibble(
@@ -248,11 +249,11 @@ lga_ngms_unscaled <- tibble(
   as.list() %>%
   lapply(`[[`, 1)
 
-# saveRDS(
-#   lga_ngms_unscaled,
-#   "outputs/lga_ngms_unscaled_subset.RDS"
-# )
-# 
+saveRDS(
+  lga_ngms_unscaled,
+  "outputs/lga_ngms_unscaled_subset.RDS"
+)
+
 # lga_ngms_unscaled <- readRDS("outputs/lga_ngms_unscaled_subset.RDS")
 # 
 # saveRDS(
@@ -463,6 +464,32 @@ lga_tp <- bind_rows(
 ) %>%
   select(-tp_percent_reduction, -vaccination_effect_matrix)
 
+wfh_lockdown_effect <- readRDS("outputs/wfh_lockdown_effect.RDS") %>%
+  select(-state)
+
+lga_tp_wfh_only <- lga_tp %>%
+  filter(vacc_coverage == 0.8) %>%
+  left_join(
+    wfh_lockdown_effect,
+    by = "lga"
+  ) %>%
+  mutate(
+    vacc_coverage = "wfh",
+    post_vacc_tp = post_vacc_tp * tp_multiplier
+  ) %>%
+  select(-wfh_mean, -wfh_var, -lockdown_non_hh_contacts, -tp_multiplier)
+
+lga_tp_wfh <- bind_rows(
+  lga_tp %>%
+    mutate(vacc_coverage = as.character(vacc_coverage)),
+  lga_tp_wfh_only
+) %>%
+  arrange(ttiq, state, lga, vacc_coverage) %>%
+  left_join(
+    wfh_lockdown_effect %>%
+      select(lga, tp_multiplier),
+    by = "lga"
+  )
 
 # saveRDS(
 #   lga_tp,
@@ -472,6 +499,10 @@ lga_tp <- bind_rows(
 # lga_tp <- readRDS(
 #   file = "outputs/lga_tp.RDS"
 # )
+
+# write_csv(lga_tp_wfh, "outputs/lga_tp_wfh.csv")
+
+metro_lga_list <- readRDS("outputs/metro_lga_list.RDS")
 
 lga_metro_tp <- inner_join(
   lga_tp,
@@ -486,6 +517,19 @@ lga_metro_tp_vic <- lga_metro_tp %>%
 lga_metro_tp_nsw <- lga_metro_tp %>%
   filter(state == "NSW")
 
+
+
+lga_metro_tp_wfh <- inner_join(
+  lga_tp_wfh,
+  metro_lga_list,
+  by = c("lga", "state")
+)
+
+lga_metro_tp_vic_wfh <- lga_metro_tp_wfh %>%
+  filter(state == "VIC")
+
+lga_metro_tp_nsw_wfh <- lga_metro_tp_wfh %>%
+  filter(state == "NSW")
 
 
 
@@ -632,7 +676,54 @@ save_dancing_boxplots(
   width = 250
 )
 
-# vic metro examples
+# vic metro with wfh
+vm_w_max <- lga_metro_tp_vic_wfh %>%
+  filter(tp_multiplier == .$tp_multiplier[which.max(tp_multiplier)])
+
+vm_w_max2 <- lga_metro_tp_vic_wfh %>%
+  filter(
+    lga_short != "Greater\nDandenong",
+  ) %>%
+  filter(
+    tp_multiplier == .$tp_multiplier[which.max(tp_multiplier)]
+  )
+
+vm_w_min <- lga_metro_tp_vic_wfh %>%
+  filter(tp_multiplier == .$tp_multiplier[which.min(tp_multiplier)])
+
+vm_w_min2 <- lga_metro_tp_vic_wfh %>%
+  filter(
+    lga_short != "Port\nPhillip",
+  ) %>%
+  filter(
+    tp_multiplier == .$tp_multiplier[which.min(tp_multiplier)]
+  )
+
+vm_w_med <- lga_metro_tp_vic_wfh %>%
+  filter(tp_multiplier == .$tp_multiplier[which(tp_multiplier == median(tp_multiplier))])
+
+vic_metro_examplew <- 
+  bind_rows(
+    vm_w_max,
+    vm_w_max2,
+    vm_w_med,
+    vm_w_min,
+    vm_w_min2
+  ) %>%
+  mutate(
+    scenario = as.factor(lga_short) %>%
+      fct_reorder(tp_multiplier)
+  ) %>%
+  select(-tp_multiplier)
+
+save_dancing_boxplots(
+  df = vic_metro_examplew,
+  label = "vic_metro_tp_wfh",
+  width = 250,
+  wfh = TRUE
+)
+
+# nsw metro examples
 
 nm_r0max <- lga_metro_tp_nsw %>%
   filter(lga == .$lga[which.max(.$r0)])

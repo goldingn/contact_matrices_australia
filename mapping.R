@@ -213,7 +213,8 @@ dpi <- 200
 
 
 # Vic
-tp_reduction %>%
+lga_tp %>%
+  filter(vacc_coverage == 0.8) %>%
   right_join(
     vic_metro_lgas,
     by = c("lga" = "lga_name_2018")
@@ -222,7 +223,7 @@ tp_reduction %>%
   geom_sf(
     aes(
       geometry = geometry,
-      fill = tp
+      fill = post_vacc_tp
     ),
     colour = "white",
     size = 0.5
@@ -256,7 +257,9 @@ ggsave(
 )
 
 
-tp_reduction %>%
+lga_tp %>%
+  filter(vacc_coverage == 0.8) %>%
+  mutate(tp_percent_reduction)
   right_join(
     vic_metro_lgas,
     by = c("lga" = "lga_name_2018")
@@ -342,6 +345,48 @@ ggsave(
   scale = 1.2
 )
 
+lga_tp_wfh %>%
+  filter(vacc_coverage == "wfh") %>%
+  right_join(
+    vic_metro_lgas,
+    by = c("lga" = "lga_name_2018")
+  ) %>% 
+  ggplot() +
+  geom_sf(
+    aes(
+      geometry = geometry,
+      fill = post_vacc_tp
+    ),
+    colour = "white",
+    size = 0.5
+  ) +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Melbourne"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 0.7
+  ) +
+  labs(
+    title = "WFH Effect PHSM TP",
+    subtitle = "Transmission potential due to ability to work from home\nunder stay-at-home orders and after 80% vaccination threshold",
+    fill = "Transmission\nPotential"
+  ) +
+  theme_minimal()
+
+ggsave(
+  filename = "outputs/tp_vax-wfh_vic.png",
+  dpi = dpi,
+  width = 1500 / dpi,
+  height = 1250 / dpi,
+  scale = 1.2
+)
 
 wfh_lga_summary %>%
   right_join(
@@ -562,6 +607,49 @@ tp_reduction %>%
 
 ggsave(
   filename = "outputs/tp_vax_nsw.png",
+  dpi = dpi,
+  width = 1500 / dpi,
+  height = 1250 / dpi,
+  scale = 1.2
+)
+
+lga_tp_wfh %>%
+  filter(vacc_coverage == "wfh") %>%
+  right_join(
+    nsw_metro_lgas,
+    by = c("lga" = "lga_name_2018")
+  ) %>% 
+  ggplot() +
+  geom_sf(
+    aes(
+      geometry = geometry,
+      fill = post_vacc_tp
+    ),
+    colour = "white",
+    size = 0.5
+  ) +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Sydney"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 0.7
+  ) +
+  labs(
+    title = "WFH Effect PHSM TP",
+    subtitle = "Transmission potential due to ability to work from home\nunder stay-at-home orders and after 80% vaccination threshold",
+    fill = "Transmission\nPotential"
+  ) +
+  theme_minimal()
+
+ggsave(
+  filename = "outputs/tp_vax-wfh_nsw.png",
   dpi = dpi,
   width = 1500 / dpi,
   height = 1250 / dpi,

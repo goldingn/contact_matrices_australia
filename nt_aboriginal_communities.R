@@ -273,19 +273,21 @@ state_ngms_unscaled <- get_state_ngms_unscaled(
 transmission_matrices <- get_setting_transmission_matrices(
   age_breaks = age_limits_5y
 )
-names(transmission_matrices)
 
 base_matrices <- c("home", "school", "work", "other")
 
+
 remote_nt_ngm_unscaled <- get_unscaled_ngm(
-  contact_matrices = remote_matrix_updated[base_matrices],
-  transmission_matrices = transmission_matrices[base_matrices]
+  #contact_matrices = remote_matrix_updated[base_matrices],
+  contact_matrices = remote_matrix_updated,
+  transmission_matrices = transmission_matrices
 )
 
 
 urban_nt_ngm_unscaled <- get_unscaled_ngm(
-  contact_matrices = urban_matrix_updated[base_matrices],
-  transmission_matrices = transmission_matrices[base_matrices]
+  #contact_matrices = urban_matrix_updated[base_matrices],
+  contact_matrices = urban_matrix_updated,
+  transmission_matrices = transmission_matrices
 )
 
 optimal_ttiq_baseline <- 2.93
@@ -463,6 +465,30 @@ aboriginal_tp <- readRDS(
 )
 
 
+non_household_settings <- c("work", "school", "other")
+list(
+  urban = c(
+    urban_matrix_updated,
+    list(
+      non_household = Reduce(
+        urban_matrix_updated[non_household_settings]
+      )
+    )
+  ),
+  remote = c(
+    remote_matrix_updated,
+    list(
+      non_household = Reduce(
+        "+"
+        remote_matrix_updated[non_household_settings]
+      )
+    )
+  )
+) %>%
+  saveRDS(
+    file = "outputs/nt_first_nations_contact_matrices.RDS"
+  )
+
 
 # 5. plot these a la national plan figure
 
@@ -474,6 +500,13 @@ save_dancing_boxplots(
   vacc_from = "twelve"
 )
 
+save_dancing_boxplots(
+  aboriginal_tp %>%
+    select(-tp_percent_reduction),
+  label = "aboriginal_tp_12y_fade",
+  vacc_from = "twelve",
+  fade = TRUE
+)
 
 
 # 5 yo and up eligible
@@ -578,7 +611,6 @@ aboriginal_tp_partial_5y <- vaccination_effects_5y %>%
       )
     )
   )
-<<<<<<< HEAD
 
 aboriginal_tp_optimal_5y <- aboriginal_tp_partial_5y %>%
   mutate(
@@ -616,32 +648,119 @@ save_dancing_boxplots(
   fade = TRUE
 )
 
-=======
-  
-}
+# Comparison of remote NT 5 and 12 yo vaccination scenarios
 
-non_household_settings <- c("work", "school", "other")
-list(
-  urban = c(
-    urban_matrix_updated,
-    list(
-      non_household = Reduce(
-        "+",
-        urban_matrix_updated[non_household_settings]
-      )
-    )
-  ),
-  remote = c(
-    remote_matrix_updated,
-    list(
-      non_household = Reduce(
-        "+",
-        remote_matrix_updated[non_household_settings]
-      )
-    )
-  )
+nt_remote_tp <- bind_rows(
+  aboriginal_tp %>%
+    mutate(min_eligible = "twelve"),
+  aboriginal_tp_5y %>%
+    mutate(min_eligible = "five")
 ) %>%
-saveRDS(
-  file = "outputs/nt_first_nations_contact_matrices.RDS"
-)
->>>>>>> a40de00d9b14211078ad10112e3052d6c3d032a0
+  filter(population_group == "nt_remote_indigenous") %>%
+  mutate(
+    scenario = sprintf(
+      "%s%s\nTTIQ\nand\nvaccination\nfrom age\n%s",
+      toupper(substr(ttiq, 1, 1)),
+      substring(ttiq,2),
+      min_eligible
+    ),
+    scenario = as.factor(scenario) %>%
+      fct_reorder(desc(post_vacc_tp))
+  )
+
+colours <- RColorBrewer::brewer.pal(4, "Set2")
+
+baseline_colour <- washout(colours[2], 0.8)
+vaccine_colours <- washout(colours[3], c(0.7, 0.65, 0.5, 0.35, 0.2, 0.1))
+
+
+border_colour <- grey(0.6)
+r0_colour <- grey(0.5)
+label_colour <- grey(0.3)
+text_size <- 2.5
+
+multiplier <- seq(from = 1, to = 0.75, by = -0.01)
+fade_colours <- washout(colours[1], seq(from = 0, to = 1, length.out = 25))
+
+first_scenario <- levels(nt_remote_tp$scenario)[1]
+
+nt_remote_tp %>%
+  select(-ttiq, - min_eligible, - tp_percent_reduction) %>%
+  pivot_wider(
+    names_from = vacc_coverage,
+    values_from = post_vacc_tp,
+    names_prefix = "tp_coverage_"
+  ) %>%
+  control_base_plot() %>%
+  add_context_hline(
+    label = "Control",
+    at = 1,
+    linetype = 2,
+    text_size = text_size * 1.3
+  ) %>%
+  add_context_hline(
+    label = "Delta R0\n(for Australia)",
+    at = 8,
+    linetype = 2,
+    text_size = text_size * 1.3
+  ) %>%
+  # add the vaccination + ttiq effect as a box
+  add_single_box(
+    top = r0,
+    bottom = tp_baseline,
+    box_colour = baseline_colour,
+    only_scenarios = first_scenario,
+    text_main = "Baseline\nPHSM"
+  ) %>%
+  add_single_box(
+    top = tp_baseline,
+    bottom = tp_coverage_0.5,
+    box_colour = vaccine_colours[1],
+    text_main = "50%\nvaccination\ncoverage",
+    only_scenarios = first_scenario
+  ) %>%
+  add_stacked_box(
+    top = tp_coverage_0.5,
+    bottom = tp_coverage_0.6,
+    reference = tp_baseline_vacc,
+    text_main = "60%",
+    only_scenarios = first_scenario,
+    box_colour = vaccine_colours[2]
+  ) %>%
+  add_stacked_box(
+    top = tp_coverage_0.6,
+    bottom = tp_coverage_0.7,
+    reference = tp_baseline_vacc,
+    text_main = "70%",
+    only_scenarios = first_scenario,
+    box_colour = vaccine_colours[3]
+  ) %>%
+  add_stacked_box(
+    top = tp_coverage_0.7,
+    bottom = tp_coverage_0.8,
+    reference = tp_baseline_vacc,
+    text_main = "80%",
+    only_scenarios = first_scenario,
+    box_colour = vaccine_colours[4]
+  ) %>%
+  add_fading_box(
+    multiplier,
+    fade_colours
+  ) %>%
+add_arrow(8) +
+  theme(
+    axis.text.x = element_text(
+      size = 10,
+      colour = grey(0.1)
+    )
+  ) +
+  labs(subtitle = "NT remote Indigenous communities")
+
+ggsave(
+  "outputs/nt_remote_vacv_comparison.png",
+  bg = "white",
+  width = 200,
+  height = 150,
+  dpi = 300,
+  units = "mm"
+) 

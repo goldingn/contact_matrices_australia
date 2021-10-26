@@ -280,7 +280,7 @@ for (population in names(nt_first_nations_contact_matrices)) {
     matrix %>%
       as_tibble() %>%
       mutate(
-        age_group_from = rownames(matrix),
+        age_group_to = rownames(matrix),
         .before = everything()
       ) %>%
       write_csv(

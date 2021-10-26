@@ -254,16 +254,40 @@ saveRDS(
   "outputs/lga_ngms_unscaled_subset.RDS"
 )
 
-# lga_ngms_unscaled <- readRDS("outputs/lga_ngms_unscaled_subset.RDS")
+# lga_ngms_unscaled_ss <- readRDS("outputs/lga_ngms_unscaled_subset.RDS")
 # 
 # saveRDS(
 #   lga_ngms_unscaled_all,
 #   "outputs/lga_ngms_unscaled_all.RDS"
 # )
+
 # lga_ngms_unscaled <- readRDS("outputs/lga_ngms_unscaled_all.RDS")
+# missing_lga_ngms <- lga_ngms_unscaled[lapply(lga_ngms_unscaled, class) == "try-error"]
+# lga_ngms_unscaled <- lga_ngms_unscaled[lapply(lga_ngms_unscaled, class) == "matrix"]
 
 # apply calibration to all LGA NGMs
 lga_ngms <- lapply(lga_ngms_unscaled, `*`, m)
+
+# lga_ngms_ss <- lapply(lga_ngms_unscaled_ss, `*`, m)
+# 
+# lga_ngm_frame <- enframe(
+#   lga_ngms,
+#   name = "lga",
+#   value = "ngm"
+# ) %>%
+#   bind_rows(
+#     enframe(
+#       lga_ngms_ss,
+#       name = "lga",
+#       value = "ngm"
+#     )
+#   ) %>%
+#   distinct %>%
+#   arrange(lga)
+
+
+
+saveRDS(lga_ngms, "outputs/lga_ngms.RDS")
 
 lga_ngms_filter <- lga_ngms[!(lga_ngms %>% sapply(function(x) any(is.nan(x))))]
 
@@ -286,6 +310,9 @@ tpframe <- tibble(
   tp = lga_TPs,
   lga = names(lga_TPs)
 )
+
+# saveRDS(tpframe, "outputs/tpframe.RDS")
+
 
 # 
 # 
@@ -701,9 +728,11 @@ vm_w_min2 <- lga_metro_tp_vic_wfh %>%
 
 vm_w_med <- lga_metro_tp_vic_wfh %>%
   filter(tp_multiplier == .$tp_multiplier[which(tp_multiplier == median(tp_multiplier))])
+  #filter(lga_short == "Kingston")
 
-vic_metro_examplew <- 
-  bind_rows(
+
+
+vic_metro_examplew <- bind_rows(
     vm_w_max,
     vm_w_max2,
     vm_w_med,
@@ -766,5 +795,209 @@ save_dancing_boxplots(
   df = nsw_metro_example,
   label = "nsw_metro_tp",
   width = 250
+)
+
+
+# nsw metro with wfh
+nm_w_max <- lga_metro_tp_nsw_wfh %>%
+  filter(tp_multiplier == .$tp_multiplier[which.max(tp_multiplier)])
+
+nm_w_max2 <- lga_metro_tp_nsw_wfh %>%
+  filter(
+    lga_short != "Oberon",
+  ) %>%
+  filter(
+    tp_multiplier == .$tp_multiplier[which.max(tp_multiplier)]
+  )
+
+nm_w_min <- lga_metro_tp_nsw_wfh %>%
+  filter(tp_multiplier == .$tp_multiplier[which.min(tp_multiplier)])
+
+nm_w_min2 <- lga_metro_tp_nsw_wfh %>%
+  filter(
+    lga_short != "North\nSydney",
+  ) %>%
+  filter(
+    tp_multiplier == .$tp_multiplier[which.min(tp_multiplier)]
+  )
+
+nm_w_med <- lga_metro_tp_nsw_wfh %>%
+  filter(tp_multiplier == .$tp_multiplier[which(tp_multiplier == median(tp_multiplier))])
+
+nsw_metro_examplew <- 
+  bind_rows(
+    nm_w_max,
+    nm_w_max2,
+    nm_w_med,
+    nm_w_min,
+    nm_w_min2
+  ) %>%
+  mutate(
+    scenario = as.factor(lga_short) %>%
+      fct_reorder(tp_multiplier)
+  ) %>%
+  select(-tp_multiplier)
+
+save_dancing_boxplots(
+  df = nsw_metro_examplew,
+  label = "nsw_metro_tp_wfh",
+  width = 250,
+  wfh = TRUE
+)
+
+
+## LGA vax nsw
+
+# lga_ngms <- readRDS("outputs/lga_ngms.RDS)
+
+lga_vax_raw <- read_csv("data/Sep8.csv") %>%
+  select(-"...1", -date, - age_air_80, -anydose1, -anydose2)
+
+lga_vax_1014 <- lga_vax_raw %>%
+  filter(age == "12-15") %>%
+  mutate(
+    across(
+      c(-lga, -age),
+      ~ . * 0.75
+    ),
+    age = "10-14"
+  )
+
+lga_vax_1519 <- lga_vax_raw %>%
+  filter(age == "12-15" | age == "16-19") %>%
+  mutate(
+    across(
+      c(-lga, -age),
+      ~ case_when(
+        age == "12-15" ~ 0.25 * .,
+        TRUE ~ .
+      )
+    ),
+    age = "15-19"
+  ) %>%
+  group_by(lga, age) %>%
+  summarise(
+    across(
+      AZ1:Pf2,
+      ~ sum(.x)
+    )
+  ) %>%
+  ungroup
+
+
+nsw_lga_vax_effect <- lga_vax_raw %>%
+  filter(!age %in% c("10-11", "12-15", "16-19")) %>%
+  bind_rows(
+    lga_vax_1014,
+    lga_vax_1519
+  ) %>%
+  distinct %>%
+  mutate(
+    age = age %>%
+      factor(
+        levels = c(
+          "0-4",
+          "5-9",
+          "10-14",
+          "15-19",
+          "20-24",
+          "25-29",
+          "30-34",
+          "35-39",
+          "40-44",
+          "45-49",
+          "50-54",
+          "55-59",
+          "60-64",
+          "65-69",
+          "70-74",
+          "75-79",
+          "80+"
+        )
+      )
+  ) %>%
+  arrange(lga, age)%>%
+  mutate(
+    anydose = AZ1 + AZ2 + Pf1 + Pf2,
+    proportion_az_1_dose = AZ1/anydose,
+    proportion_az_2_dose = AZ2/anydose,
+    proportion_pf_1_dose = Pf1/anydose,
+    proportion_pf_2_dose = Pf2/anydose,
+    across(
+      starts_with("proportion_"),
+      ~ifelse(is.nan(.), 0, .)
+    ),
+    average_efficacy_transmission = average_efficacy(
+      efficacy_az_1_dose = combine_efficacy(0.46, 0.02),
+      efficacy_az_2_dose = combine_efficacy(0.67, 0.36),
+      efficacy_pf_1_dose = combine_efficacy(0.57, 0.13),
+      efficacy_pf_2_dose = combine_efficacy(0.80, 0.65),
+      proportion_az_1_dose = proportion_az_1_dose,
+      proportion_az_2_dose = proportion_az_2_dose,
+      proportion_pf_1_dose = proportion_pf_1_dose,
+      proportion_pf_2_dose = proportion_pf_2_dose
+    ),
+    average_efficacy_transmission = replace_na(average_efficacy_transmission, 0)
+  ) %>%
+  nest(cols = -lga) %>%
+  rename(data = cols) %>%
+  left_join(
+    lga_ngms %>%
+      enframe(
+        name = "lga",
+        value = "ngm"
+      ),
+    by = "lga"
+  ) %>%
+  # some ngms missing
+  # try to track down later
+  mutate(
+    isnull = map(
+      ngm,
+      function(x){
+        is.null(x)
+      }
+    ) %>%
+      unlist
+  ) %>%
+  filter(!isnull) %>%
+  select(
+    -isnull
+  ) %>%
+  mutate(
+    vaccination_transmission_multiplier = map2(
+      .x = data,
+      .y = ngm,
+      .f = function(x, y){
+        coverage_any_vaccine <- x$anydose
+        average_efficacy_transmission <- x$average_efficacy_transmission
+        
+        
+        vaccination_transmission_multiplier <- vaccination_transmission_effect(
+          age_coverage = coverage_any_vaccine,
+          efficacy_mean = average_efficacy_transmission,
+          next_generation_matrix = y
+        )$overall
+
+        return(vaccination_transmission_multiplier)
+        
+      } 
+    ) %>%
+      unlist,
+    vaccination_transmission_multiplier = ifelse(
+      is.na(vaccination_transmission_multiplier),
+      1,
+      vaccination_transmission_multiplier
+    ),
+    vaccination_transmission_reduction_percent =
+      100 * (1 - vaccination_transmission_multiplier)
+    )
+
+nsw_lga_vax_effect
+
+write_csv(
+  nsw_lga_vax_effect %>%
+    select(lga, vaccination_transmission_multiplier, vaccination_transmission_reduction_percent),
+  file = "outputs/nsw_lga_vax_effect.csv"
 )
 

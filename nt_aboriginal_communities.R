@@ -278,15 +278,13 @@ base_matrices <- c("home", "school", "work", "other")
 
 
 remote_nt_ngm_unscaled <- get_unscaled_ngm(
-  #contact_matrices = remote_matrix_updated[base_matrices],
-  contact_matrices = remote_matrix_updated,
+  contact_matrices = remote_matrix_updated[base_matrices],
   transmission_matrices = transmission_matrices
 )
 
 
 urban_nt_ngm_unscaled <- get_unscaled_ngm(
-  #contact_matrices = urban_matrix_updated[base_matrices],
-  contact_matrices = urban_matrix_updated,
+  contact_matrices = urban_matrix_updated[base_matrices],
   transmission_matrices = transmission_matrices
 )
 
@@ -453,7 +451,10 @@ aboriginal_tp <- bind_rows(
   optimal = aboriginal_tp_optimal,
   partial = aboriginal_tp_partial,
   .id = "ttiq"
-)
+) %>%
+  # removing NT only bar
+  filter(scenario != "All\nNT") %>%
+  mutate(scenario = fct_drop(scenario))
 
 saveRDS(
   aboriginal_tp,
@@ -471,6 +472,7 @@ list(
     urban_matrix_updated,
     list(
       non_household = Reduce(
+        "+",
         urban_matrix_updated[non_household_settings]
       )
     )
@@ -479,7 +481,7 @@ list(
     remote_matrix_updated,
     list(
       non_household = Reduce(
-        "+"
+        "+",
         remote_matrix_updated[non_household_settings]
       )
     )
@@ -754,10 +756,10 @@ add_arrow(8) +
       colour = grey(0.1)
     )
   ) +
-  labs(subtitle = "NT remote Indigenous communities")
+  labs(subtitle = "Remote Indigenous communities")
 
 ggsave(
-  "outputs/nt_remote_vacv_comparison.png",
+  "outputs/nt_remote_vacc_comparison.png",
   bg = "white",
   width = 200,
   height = 150,

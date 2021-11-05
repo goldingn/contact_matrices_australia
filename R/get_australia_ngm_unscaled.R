@@ -9,7 +9,7 @@
 #' @export
 get_australia_ngm_unscaled <- function(model, age_breaks) {
 
-  # unscaled next generation amtrix for all Australia
+  # unscaled next generation matrix for all Australia
   
   transmission_matrices <- get_setting_transmission_matrices(
     age_breaks = age_breaks

@@ -12,7 +12,7 @@
 #' @author Nick Golding
 #' @export
 get_R <- function(transition_matrix, stable_age = NULL, tolerance = 0.001,
-                  max_iter = 1000, warm_start = TRUE) {
+                  max_iter = 3000, warm_start = TRUE) {
 
   #Re(eigen(x)$value[1])
   # function from STEPS
@@ -51,6 +51,7 @@ get_R <- function(transition_matrix, stable_age = NULL, tolerance = 0.001,
       max_iter,
       " iterations"
     )
+    return(NA)
   }
   
   # globally assign the stable age distribution if needed

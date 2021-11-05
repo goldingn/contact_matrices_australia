@@ -65,7 +65,7 @@ metro <- gcc2021 %>%
 metro_area <- lga2018 %>%
   filter(
     apply(
-      X = st_intersects(., metro, sparse = FALSE),
+      X = st_intersects(., st_as_sf(metro), sparse = FALSE),
       MARGIN = 1,
       FUN = any
     )
@@ -74,9 +74,15 @@ metro_area <- lga2018 %>%
     lga_area = st_area(.) %>% as.numeric
   )
 
+metro_lgas <- metro_area %>%
+  as.data.frame %>%
+  select(lga_name_2018, state_name_2016) %>%
+  as_tibble
+
+# saveRDS(metro_lgas, file = "outputs/metro_lgas.RDS")
 
 # calculate area of intersection of LGAs intersecting with metropolitain areas
-intersection_area <- st_intersection(lga2018, metro) %>%
+intersection_area <- st_intersection(lga2018, st_as_sf(metro)) %>%
   mutate(
     intersection_area = st_area(.) %>% as.numeric
   ) %>%
@@ -94,6 +100,21 @@ metro_lgas <- metro_area %>%
     pc_metro = intersection_area/lga_area * 100
   ) %>% tibble
 
+
+
+metro_lga_list <- abs_lga_lookup %>%
+  right_join(
+    metro_lgas %>%
+      filter(pc_metro > 5),
+    by = c("lga" = "lga_name_2018")
+  ) %>%
+  select(state, lga)
+
+
+saveRDS(
+  object = metro_lga_list,
+  file = "outputs/metro_lga_list.RDS"
+)
 
 # check if sensible to include in metro and adjust filter based on % metro
 
@@ -192,7 +213,8 @@ dpi <- 200
 
 
 # Vic
-tp_reduction %>%
+lga_tp %>%
+  filter(vacc_coverage == 0.8) %>%
   right_join(
     vic_metro_lgas,
     by = c("lga" = "lga_name_2018")
@@ -201,7 +223,7 @@ tp_reduction %>%
   geom_sf(
     aes(
       geometry = geometry,
-      fill = tp
+      fill = post_vacc_tp
     ),
     colour = "white",
     size = 0.5
@@ -235,7 +257,9 @@ ggsave(
 )
 
 
-tp_reduction %>%
+lga_tp %>%
+  filter(vacc_coverage == 0.8) %>%
+  mutate(tp_percent_reduction)
   right_join(
     vic_metro_lgas,
     by = c("lga" = "lga_name_2018")
@@ -321,6 +345,48 @@ ggsave(
   scale = 1.2
 )
 
+lga_tp_wfh %>%
+  filter(vacc_coverage == "wfh") %>%
+  right_join(
+    vic_metro_lgas,
+    by = c("lga" = "lga_name_2018")
+  ) %>% 
+  ggplot() +
+  geom_sf(
+    aes(
+      geometry = geometry,
+      fill = post_vacc_tp
+    ),
+    colour = "white",
+    size = 0.5
+  ) +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Melbourne"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 0.7
+  ) +
+  labs(
+    title = "WFH Effect PHSM TP",
+    subtitle = "Transmission potential due to ability to work from home\nunder stay-at-home orders and after 80% vaccination threshold",
+    fill = "Transmission\nPotential"
+  ) +
+  theme_minimal()
+
+ggsave(
+  filename = "outputs/tp_vax-wfh_vic.png",
+  dpi = dpi,
+  width = 1500 / dpi,
+  height = 1250 / dpi,
+  scale = 1.2
+)
 
 wfh_lga_summary %>%
   right_join(
@@ -547,6 +613,49 @@ ggsave(
   scale = 1.2
 )
 
+lga_tp_wfh %>%
+  filter(vacc_coverage == "wfh") %>%
+  right_join(
+    nsw_metro_lgas,
+    by = c("lga" = "lga_name_2018")
+  ) %>% 
+  ggplot() +
+  geom_sf(
+    aes(
+      geometry = geometry,
+      fill = post_vacc_tp
+    ),
+    colour = "white",
+    size = 0.5
+  ) +
+  scale_fill_viridis_c(
+    begin = 0.1,
+    end = 1,
+    option = "C"
+  ) +
+  geom_sf(
+    data = metro %>%
+      filter(city == "Greater Sydney"),
+    aes(geometry = geometry),
+    colour = "black",
+    alpha = 0,
+    size = 0.7
+  ) +
+  labs(
+    title = "WFH Effect PHSM TP",
+    subtitle = "Transmission potential due to ability to work from home\nunder stay-at-home orders and after 80% vaccination threshold",
+    fill = "Transmission\nPotential"
+  ) +
+  theme_minimal()
+
+ggsave(
+  filename = "outputs/tp_vax-wfh_nsw.png",
+  dpi = dpi,
+  width = 1500 / dpi,
+  height = 1250 / dpi,
+  scale = 1.2
+)
+
 
 wfh_lga_summary %>%
   right_join(
@@ -643,6 +752,7 @@ wfh_lga_summary <- wfh_lga  %>%
             wfh_var = Hmisc::wtd.var(SA2_WFH, weights = population / LGA_pop * ratio, normwt = TRUE),
             state = first(state))
 
+saveRDS(wfh_lga_summary, "outputs/wfh_lga_summary.RDS")
 
 wfh_index %>%
   left_join(

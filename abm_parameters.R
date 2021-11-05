@@ -267,7 +267,7 @@ setting_transmission_probabilities_for_bec <- bind_rows(
 write_csv(setting_transmission_probabilities_for_bec,
           file = "outputs/setting_transmission_probabilities_for_bec.csv")
   
-nt_first_nations_contact_matrices <- readRDS("nt_first_nations_contact_matrices_updated.RDS")
+nt_first_nations_contact_matrices <- readRDS("outputs/nt_first_nations_contact_matrices.RDS")
 dir.create("outputs/bec_contact_matrices", showWarnings = FALSE)
 for (population in names(nt_first_nations_contact_matrices)) {
   
@@ -280,7 +280,7 @@ for (population in names(nt_first_nations_contact_matrices)) {
     matrix %>%
       as_tibble() %>%
       mutate(
-        age_group_from = rownames(matrix),
+        age_group_to = rownames(matrix),
         .before = everything()
       ) %>%
       write_csv(

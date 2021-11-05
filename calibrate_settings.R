@@ -81,8 +81,19 @@ england_vaccination_effect <- get_england_vaccination_coverage() %>%
       mean
     ),
     .groups = "drop"
+  ) %>%
+  mutate(
+    age_group = factor(
+      age_group,
+      levels = str_sort(
+        unique(age_group),
+        numeric = TRUE
+      )
+    )
+  ) %>%
+  arrange(
+    age_group
   )
-
 
 google_spec <- cols(
   country_region_code = col_character(),
@@ -623,15 +634,15 @@ for (i in 1:30) {
     col = grey(0.4)
   )
 }
-  lines(prior_susceptibility ~ age_lower, lwd = 3)
+lines(prior_susceptibility ~ age_lower, lwd = 3)
 
 asymptomatic_relative_infectiousness <- 0.5
 
 relative_infectiousness <- davies_trends$clinical_fraction + (1 - davies_trends$clinical_fraction) * asymptomatic_relative_infectiousness
 
 relative_transmission_matrix <- kronecker(
-  as_data(relative_infectiousness),
-  t(susceptibility),
+  susceptibility,
+  as_data(t(relative_infectiousness)),
   FUN = "*"
 )
 
@@ -681,14 +692,29 @@ ngm_pre_pandemic <- Reduce("+", setting_ngms)
 # apply vaccination effects and non-household distancing effects
 ngm <- Reduce("+", setting_ngms_study_period)
 
+# use reasonable initial values for faster sampling
+initial_state <- c(0.005, 0.006, 0.007, 0.009, 0.011, 0.015, 0.019, 0.025, 0.032, 
+                   0.041, 0.05, 0.06, 0.066, 0.07, 0.069, 0.059, 0.023, 0.017, 0.011, 
+                   0.01, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.01, 
+                   0.01, 0.011, 0.01, 0.011, 0.012, 0.012, 0.013, 0.013, 0.013, 
+                   0.013, 0.014, 0.014, 0.012, 0.011, 0.011, 0.011, 0.01, 0.009, 
+                   0.009, 0.008, 0.008, 0.007, 0.006, 0.005, 0.005, 0.005, 0.004, 
+                   0.004, 0.004, 0.003, 0.003, 0.003, 0.003, 0.003, 0.002, 0.002, 
+                   0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.001, 
+                   0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.004)
+
 # calculate the stable solutions in the face of vaccination
-rt_solutions <- greta.dynamics::iterate_matrix(ngm)
+rt_solutions <- greta.dynamics::iterate_matrix(
+  ngm,
+  initial_state = initial_state
+)
 stable_age_distribution <- rt_solutions$stable_distribution
 rt <- rt_solutions$lambda
 
 # do the same for pre-vaccination to get R0 for Delta
 r0_solutions <- greta.dynamics::iterate_matrix(
-  ngm_pre_pandemic
+  ngm_pre_pandemic,
+  initial_state = initial_state
 )
 r0 <- r0_solutions$lambda
 
@@ -926,6 +952,9 @@ stable_age_davies_grouped <- calculate(
   values = estimates_davies
 )[[1]][, 1]
 
+
+
+
 png(
   "outputs/age_distribution.png",
   width = 1000,
@@ -990,7 +1019,7 @@ dput(
 
 
 # combine the clinical fraction and age estimates
-daves_smoothed_extended <- davies_trends %>%
+davies_smoothed_extended <- davies_trends %>%
   bind_cols(
     davies_updated = susceptibility_posterior_mean
   ) %>%
@@ -1015,7 +1044,8 @@ daves_smoothed_extended <- davies_trends %>%
     )
   )
 
-datapasta::dpasta(daves_smoothed_extended)
+datapasta::dpasta(davies_smoothed_extended)
+
 
 
 
